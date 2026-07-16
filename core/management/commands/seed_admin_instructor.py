@@ -13,11 +13,11 @@ class Command(BaseCommand):
     help = "Create or update admin and instructor accounts."
 
     def add_arguments(self, parser):
-        parser.add_argument("--admin-username", default="admin")
-        parser.add_argument("--admin-password", default="admin-pass-123")
+        parser.add_argument("--admin-username", default="vikram")
+        parser.add_argument("--admin-password", default="secret123")
         parser.add_argument("--admin-email", default="admin@example.com")
-        parser.add_argument("--instructor-username", default="instructor")
-        parser.add_argument("--instructor-password", default="instructor-pass-123")
+        parser.add_argument("--instructor-username", default="john")
+        parser.add_argument("--instructor-password", default="secret123")
         parser.add_argument("--instructor-email", default="instructor@example.com")
 
     def handle(self, *args, **opts):
