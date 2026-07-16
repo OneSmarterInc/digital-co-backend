@@ -12,6 +12,7 @@ class Tier(models.TextChoices):
 
 
 class UserRole(models.TextChoices):
+    ADMIN = 'ADMIN', 'Admin'
     STUDENT = 'STUDENT', 'Student'
     INSTRUCTOR = 'INSTRUCTOR', 'Instructor'
 
