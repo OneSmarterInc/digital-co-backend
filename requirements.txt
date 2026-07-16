@@ -1,0 +1,7 @@
+Django>=5.1,<5.2
+gunicorn
+djangorestframework
+djangorestframework-simplejwt
+django-cors-headers
+python-dotenv
+anthropic        # only needed when DIGITALCO_LLM_PROVIDER=anthropic (real advisors)

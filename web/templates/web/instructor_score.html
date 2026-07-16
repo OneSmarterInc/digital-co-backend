@@ -1,0 +1,22 @@
+{% extends "web/base.html" %}
+{% block content %}
+<h1>Score {{ score.week_instance }}</h1>
+<form method="post">
+  {% csrf_token %}
+  <label for="strategic_judgment">Strategic judgment</label>
+  <input id="strategic_judgment" name="strategic_judgment" type="number" min="0" value="0">
+  <label for="execution_consequence">Execution consequence</label>
+  <input id="execution_consequence" name="execution_consequence" type="number" min="0" value="0">
+  <label for="coherence">Coherence</label>
+  <input id="coherence" name="coherence" type="number" min="0" value="0">
+  <label for="deliverable_quality">Deliverable quality</label>
+  <input id="deliverable_quality" name="deliverable_quality" type="number" min="0" value="0">
+  <label for="rubric_notes">Rubric notes</label>
+  <textarea id="rubric_notes" name="rubric_notes" rows="5"></textarea>
+  <label for="plan_sound">
+    <input id="plan_sound" name="plan_sound" type="checkbox" value="true">
+    Plan sound
+  </label>
+  <button type="submit">Finalize</button>
+</form>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "web/base.html" %}
+{% block content %}
+<h1>{{ conversation.advisor.name }}</h1>
+<p>{{ conversation.advisor.title }}</p>
+
+{% for message in conversation.messages.all %}
+  <section class="panel">
+    <strong>{{ message.get_role_display }}</strong>
+    <p>{{ message.content }}</p>
+  </section>
+{% endfor %}
+
+<form method="post">
+  {% csrf_token %}
+  <label for="content">Message</label>
+  <textarea id="content" name="content" rows="4" required></textarea>
+  <button type="submit">Send</button>
+</form>
+<p><a href="{% url 'web:student_briefing' %}">Back to briefing</a></p>
+{% endblock %}

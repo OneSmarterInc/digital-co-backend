@@ -1,0 +1,52 @@
+{% extends "web/base.html" %}
+{% block content %}
+<h1>{{ briefing.title }}</h1>
+<p>{{ briefing.body }}</p>
+
+<h2>Executive Reads</h2>
+<ul>{% for read in briefing.exec_reads %}<li>{{ read }}</li>{% endfor %}</ul>
+
+<h2>Signals</h2>
+<ul>{% for signal in briefing.signals %}<li>{{ signal }}</li>{% endfor %}</ul>
+
+<h2>Artifacts</h2>
+{% for artifact in artifacts %}
+  <section class="panel">
+    <h3>{{ artifact.title }}</h3>
+    <p>{{ artifact.body }}</p>
+  </section>
+{% endfor %}
+
+<h2>Advisors</h2>
+<ul>
+  {% for advisor in advisors %}
+    <li><a href="{% url 'web:advisor_consultation' advisor.id %}">{{ advisor.name }}</a></li>
+  {% empty %}
+    <li>No advisors configured yet.</li>
+  {% endfor %}
+</ul>
+
+<h2>Submit Decision</h2>
+<form method="post" action="{% url 'web:submit_decision' %}">
+  {% csrf_token %}
+  {% for field in decision_spec.fields %}
+    <label for="{{ field.key }}">{{ field.label }}</label>
+    {% if field.choices %}
+      <select id="{{ field.key }}" name="{{ field.key }}" {% if field.required %}required{% endif %}>
+        {% for choice in field.choices %}
+          <option value="{{ choice.value }}">{{ choice.label }}</option>
+        {% endfor %}
+      </select>
+    {% elif field.field_type == "textarea" %}
+      <textarea id="{{ field.key }}" name="{{ field.key }}" rows="5" {% if field.required %}required{% endif %}></textarea>
+    {% elif field.field_type == "boolean" %}
+      <input id="{{ field.key }}" name="{{ field.key }}" type="checkbox" value="true">
+    {% else %}
+      <input id="{{ field.key }}" name="{{ field.key }}" {% if field.required %}required{% endif %}>
+    {% endif %}
+  {% endfor %}
+  <label for="deliverable_text">Deliverable</label>
+  <textarea id="deliverable_text" name="deliverable_text" rows="6">{{ decision_spec.deliverable_prompt }}</textarea>
+  <button type="submit">Submit</button>
+</form>
+{% endblock %}

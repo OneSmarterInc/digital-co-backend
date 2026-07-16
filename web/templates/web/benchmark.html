@@ -1,0 +1,20 @@
+{% extends "web/base.html" %}
+{% block content %}
+<h1>Benchmark after week {{ benchmark.after_week }}</h1>
+<ol>
+  {% for row in benchmark_payload.standings %}
+    <li>
+      {{ row.team_name }}:
+      {{ row.benchmark_score }} benchmark points
+      (score {{ row.total_score }})
+      {% if row.tier_outcome %} - {{ row.tier_outcome }}{% endif %}
+      {% if row.visible_strengths %}
+        <div>Strengths: {{ row.visible_strengths|join:", " }}</div>
+      {% endif %}
+      {% if row.visible_weaknesses %}
+        <div>Watch items: {{ row.visible_weaknesses|join:", " }}</div>
+      {% endif %}
+    </li>
+  {% endfor %}
+</ol>
+{% endblock %}
