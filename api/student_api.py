@@ -12,7 +12,7 @@ from rest_framework.views import APIView
 
 from django.db.models import Count, Sum
 
-from advisors.models import AdvisorSession
+from advisors.models import BILLED, AdvisorSession
 from core.models import Enrollment, Run
 
 from .instructor_api import _firm_numbering, _rounds
@@ -65,9 +65,12 @@ class StudentSimulationsView(APIView):
                     default=1,
                 ) or 1
 
-            usage = AdvisorSession.objects.filter(
-                conversation__run__team__cohort=cohort, student=request.user,
-            ).aggregate(hours=Count('id'), due=Sum('hourly_rate'))
+            usage = (
+                AdvisorSession.objects
+                .for_cohort(cohort)
+                .filter(student=request.user)
+                .aggregate(hours=Count('id'), due=Sum(BILLED))
+            )
 
             _, numbering = _firm_numbering(cohort)
             number = numbering.get(e.team_id) if e.team_id else None

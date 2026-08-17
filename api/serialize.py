@@ -105,6 +105,11 @@ def group_session_json(session):
             'created_at': turn.created_at.isoformat(),
         })
 
+    # A room bills the cohort's hourly rate once per advisor seated in it, so the
+    # client can state the price before the student opens their mouth.
+    rate = session.run.team.cohort.advisor_hourly_rate or 0
+    advisor_count = len(session.active_advisors or [])
+
     return {
         'session_id': session.id,
         'week_number': session.week_number,
@@ -112,6 +117,9 @@ def group_session_json(session):
         'turns': turns,
         'student_turns': student_turns,
         'capped': is_group_capped(student_turns),
+        'advisor_hourly_rate': rate,
+        'advisor_count': advisor_count,
+        'hourly_cost': rate * advisor_count,
     }
 
 

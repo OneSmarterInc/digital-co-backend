@@ -10,11 +10,21 @@ from django.test import TestCase
 from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from core.models import Cohort, Run, Team, Tier, User, UserRole
+from django.db.models import Count, Sum
+
+from advisors.models import (
+    BILLED, AdvisorDefinition, AdvisorSession, Conversation, GroupSession,
+)
+from core.models import Cohort, Enrollment, Run, Team, Tier, User, UserRole
 from scoring.models import ScoreRecord
 from weeks.models import Submission, WeekInstance, WeekInstanceStatus
 
-from .views import InstructorQueueView, RunView, resolve_run, run_for_user
+from .instructor_api import (
+    InstructorSimulationDetailView, _advisor_usage_by_student, _billing,
+)
+from .views import (
+    GroupConversationView, InstructorQueueView, RunView, resolve_run, run_for_user,
+)
 
 
 class MultiSimRunResolutionTests(TestCase):
@@ -113,3 +123,145 @@ class InstructorGradingQueueTests(TestCase):
         resp = self._queue(f"?cohort={self.ug['cohort'].id}")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual({r['cohort'] for r in resp.data}, {'SIM-UG'})
+
+
+class GroupRoomBillingTests(TestCase):
+    """A war-room hour is not free: it costs the cohort's hourly rate once per
+    advisor seated in the room, on the same one-started-hour meter as a 1:1.
+    """
+
+    def setUp(self):
+        self.student = User.objects.create_user(
+            username='room@example.com', password='pw', role=UserRole.STUDENT,
+        )
+        self.cohort = Cohort.objects.create(
+            name='SIM-ROOM', tier=Tier.UNDERGRAD, advisor_hourly_rate=100,
+        )
+        team = Team.objects.create(cohort=self.cohort, name='Team 1')
+        team.members.add(self.student)
+        self.enrollment = Enrollment.objects.create(
+            cohort=self.cohort, student=self.student, team=team,
+        )
+        self.run = Run.objects.create(team=team, current_week=1)
+
+    def _room(self, advisors):
+        return GroupSession.objects.create(
+            run=self.run, week_number=1, active_advisors=advisors,
+        )
+
+    def _meter(self, session):
+        return GroupConversationView._meter_group_session(self.student, self.run, session)
+
+    def test_room_hour_bills_rate_times_advisors(self):
+        billed = self._meter(self._room(['a', 'b', 'c']))
+        self.assertEqual(billed.hourly_rate, 100)
+        self.assertEqual(billed.advisor_count, 3)
+        self.assertEqual(billed.billed, 300)
+
+    def test_second_message_inside_the_hour_rides_along(self):
+        room = self._room(['a', 'b'])
+        first = self._meter(room)
+        second = self._meter(room)
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(AdvisorSession.objects.filter(group_session=room).count(), 1)
+
+    def test_cohort_totals_include_room_hours(self):
+        self._meter(self._room(['a', 'b', 'c', 'd']))
+        usage = (
+            AdvisorSession.objects
+            .for_cohort(self.cohort)
+            .filter(student=self.student)
+            .aggregate(hours=Count('id'), due=Sum(BILLED))
+        )
+        self.assertEqual(usage['hours'], 1)
+        self.assertEqual(usage['due'], 400)
+
+    def test_faculty_totals_split_group_out_of_the_advisor_total(self):
+        # One 3-advisor room hour (300) plus one 1:1 hour (100).
+        self._meter(self._room(['a', 'b', 'c']))
+        AdvisorSession.objects.create(
+            conversation=Conversation.objects.create(
+                run=self.run, week_number=1,
+                advisor=AdvisorDefinition.objects.create(key='solo_a', name='A', title='t', persona='p', lane='l'),
+            ),
+            student=self.student, enrollment=self.enrollment, hourly_rate=100,
+        )
+
+        usage = _advisor_usage_by_student(self.cohort)[self.student.id]
+        self.assertEqual((usage['hours'], usage['due']), (2, 400))
+        self.assertEqual((usage['group_hours'], usage['group_due']), (1, 300))
+
+        billing = _billing(self.cohort, [self.enrollment])
+        self.assertEqual((billing['advisor_hours'], billing['advisor_billed']), (2, 400))
+        self.assertEqual((billing['group_hours'], billing['group_billed']), (1, 300))
+
+
+class AdvisorRateEditTests(TestCase):
+    """Faculty can re-price advisor time after provisioning. Hours already billed
+    keep the rate snapshotted on their session, so an edit never rewrites history.
+    """
+
+    def setUp(self):
+        self.instructor = User.objects.create_user(
+            username='prof2@example.com', password='pw', role=UserRole.INSTRUCTOR,
+        )
+        self.student = User.objects.create_user(
+            username='rate@example.com', password='pw', role=UserRole.STUDENT,
+        )
+        self.cohort = Cohort.objects.create(
+            name='SIM-RATE', tier=Tier.UNDERGRAD, advisor_hourly_rate=100,
+        )
+        self.cohort.instructors.add(self.instructor)
+        team = Team.objects.create(cohort=self.cohort, name='Team 1')
+        team.members.add(self.student)
+        self.enrollment = Enrollment.objects.create(
+            cohort=self.cohort, student=self.student, team=team,
+        )
+        self.run = Run.objects.create(team=team, current_week=1)
+
+    def _patch(self, body, user=None):
+        request = APIRequestFactory().patch(
+            f'/api/instructor/simulations/{self.cohort.id}/', body, format='json',
+        )
+        force_authenticate(request, user=user or self.instructor)
+        return InstructorSimulationDetailView.as_view()(request, cohort_id=self.cohort.id)
+
+    def test_instructor_can_change_the_rate(self):
+        resp = self._patch({'advisor_hourly_rate': 250})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['advisor_hourly_rate'], 250)
+        self.assertEqual(resp.data['previous_advisor_hourly_rate'], 100)
+        self.cohort.refresh_from_db()
+        self.assertEqual(self.cohort.advisor_hourly_rate, 250)
+
+    def test_rate_can_be_switched_on_from_zero(self):
+        self.cohort.advisor_hourly_rate = 0
+        self.cohort.save(update_fields=['advisor_hourly_rate'])
+        self.assertEqual(self._patch({'advisor_hourly_rate': 80}).status_code, 200)
+        self.cohort.refresh_from_db()
+        self.assertEqual(self.cohort.advisor_hourly_rate, 80)
+
+    def test_already_billed_hours_keep_their_old_rate(self):
+        room = GroupSession.objects.create(
+            run=self.run, week_number=1, active_advisors=['a', 'b'],
+        )
+        billed = GroupConversationView._meter_group_session(self.student, self.run, room)
+        self._patch({'advisor_hourly_rate': 900})
+        billed.refresh_from_db()
+        self.assertEqual(billed.hourly_rate, 100)
+        self.assertEqual(billed.billed, 200)
+
+    def test_rejects_junk_and_out_of_range(self):
+        for body in ({'advisor_hourly_rate': 'free'}, {'advisor_hourly_rate': -5},
+                     {'advisor_hourly_rate': 100001}, {}):
+            self.assertEqual(self._patch(body).status_code, 400)
+        self.cohort.refresh_from_db()
+        self.assertEqual(self.cohort.advisor_hourly_rate, 100)
+
+    def test_another_instructors_cohort_is_not_editable(self):
+        outsider = User.objects.create_user(
+            username='other@example.com', password='pw', role=UserRole.INSTRUCTOR,
+        )
+        self.assertEqual(self._patch({'advisor_hourly_rate': 1}, user=outsider).status_code, 404)
+        self.cohort.refresh_from_db()
+        self.assertEqual(self.cohort.advisor_hourly_rate, 100)

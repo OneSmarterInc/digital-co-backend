@@ -503,6 +503,7 @@ class GroupConversationView(APIView):
             return Response({'detail': 'Start a room before sending a message.'}, status=409)
         content = (request.data.get('content') or '').strip()
         if content:
+            self._meter_group_session(request.user, run, session)
             GroupAdvisorService().respond(
                 session=session,
                 message=content,
@@ -511,6 +512,32 @@ class GroupConversationView(APIView):
             )
         session.refresh_from_db()
         return Response(serialize.group_session_json(session))
+
+    @staticmethod
+    def _meter_group_session(user, run, session):
+        """Same hourly meter as a 1:1 advisor, priced for a room: one started hour
+        costs the cohort rate once per advisor seated in it. The roster is fixed
+        when the room is created, so the count can't drift mid-hour."""
+        cohort = run.team.cohort
+        now = dj_timezone.now()
+        open_session = (
+            AdvisorSession.objects
+            .filter(group_session=session, student=user, started_at__gt=now - timedelta(hours=1))
+            .order_by('-started_at')
+            .first()
+        )
+        if open_session:
+            open_session.last_activity_at = now
+            open_session.save(update_fields=['last_activity_at'])
+            return open_session
+        enrollment = Enrollment.objects.filter(cohort=cohort, student=user).first()
+        return AdvisorSession.objects.create(
+            group_session=session,
+            student=user,
+            enrollment=enrollment,
+            hourly_rate=cohort.advisor_hourly_rate or 0,
+            advisor_count=max(1, len(session.active_advisors or [])),
+        )
 
 
 class InstructorQueueView(APIView):
@@ -599,7 +626,8 @@ def _workspace_billing(simulations):
     every cohort is free (no per-seat price and no advisor rate) — the UI shows a
     'set a rate to see charges' note rather than fabricated figures."""
     fields = ('total_billed', 'received', 'pending', 'advisor_billed',
-              'advisor_hours', 'paid_count', 'total_count')
+              'advisor_hours', 'group_billed', 'group_hours',
+              'paid_count', 'total_count')
     agg = {f: 0 for f in fields}
     rates_configured = False
     for sim in simulations:

@@ -18,13 +18,14 @@ from django.conf import settings
 from django.db import transaction
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
-from django.db.models import Count, Sum
+from django.db.models import Count, Q, Sum
+from django.db.models.functions import Coalesce
 from django.utils import timezone as dj_timezone
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from advisors.models import AdvisorSession
+from advisors.models import BILLED, AdvisorSession
 from core.models import (
     Cohort, Enrollment, Invitation, InvitationStatus, Run, RunStatus, Team, User, UserRole,
 )
@@ -84,15 +85,36 @@ def _rounds(cohort, current_round):
     return rows
 
 
+# A war-room hour costs several times a 1:1 hour, so faculty need the two split
+# out, not just a combined total they can't explain to a student who queries it.
+GROUP_HOURS = Count('id', filter=Q(group_session__isnull=False))
+GROUP_BILLED = Sum(BILLED, filter=Q(group_session__isnull=False))
+
+
 def _advisor_usage_by_student(cohort):
-    """{student_id: {'hours': n, 'due': total}} for the cohort's advisor sessions."""
+    """{student_id: {'hours', 'due', 'group_hours', 'group_due'}} for the cohort.
+
+    hours/due are the totals across both modes; group_* is the war-room slice of
+    them, so 1:1 usage is the difference.
+    """
     rows = (
         AdvisorSession.objects
-        .filter(conversation__run__team__cohort=cohort)
+        .for_cohort(cohort)
         .values('student_id')
-        .annotate(hours=Count('id'), due=Sum('hourly_rate'))
+        .annotate(
+            hours=Count('id'), due=Sum(BILLED),
+            group_hours=GROUP_HOURS, group_due=GROUP_BILLED,
+        )
     )
-    return {r['student_id']: {'hours': r['hours'], 'due': r['due'] or 0} for r in rows}
+    return {
+        r['student_id']: {
+            'hours': r['hours'],
+            'due': r['due'] or 0,
+            'group_hours': r['group_hours'] or 0,
+            'group_due': r['group_due'] or 0,
+        }
+        for r in rows
+    }
 
 
 def _student_rows(enrollments, numbering, advisor_usage=None):
@@ -112,6 +134,8 @@ def _student_rows(enrollments, numbering, advisor_usage=None):
             'paid': e.paid,
             'advisor_hours': usage.get('hours', 0),
             'advisor_due': usage.get('due', 0),
+            'group_hours': usage.get('group_hours', 0),
+            'group_due': usage.get('group_due', 0),
         })
     rows.sort(key=lambda r: ((r['firm_index'] if r['firm_index'] is not None else 999), r['name'].lower()))
     return rows
@@ -121,8 +145,9 @@ def _billing(cohort, enrollments):
     price = cohort.price_per_student or 0
     total = len(enrollments)
     paid = sum(1 for e in enrollments if e.paid)
-    advisor = AdvisorSession.objects.filter(conversation__run__team__cohort=cohort).aggregate(
-        hours=Count('id'), billed=Sum('hourly_rate'),
+    advisor = AdvisorSession.objects.for_cohort(cohort).aggregate(
+        hours=Count('id'), billed=Sum(BILLED),
+        group_hours=GROUP_HOURS, group_billed=GROUP_BILLED,
     )
     advisor_hours = advisor['hours'] or 0
     advisor_billed = advisor['billed'] or 0
@@ -131,6 +156,9 @@ def _billing(cohort, enrollments):
         'advisor_hourly_rate': cohort.advisor_hourly_rate or 0,
         'advisor_hours': advisor_hours,
         'advisor_billed': advisor_billed,
+        # The war-room slice of the two figures above.
+        'group_hours': advisor['group_hours'] or 0,
+        'group_billed': advisor['group_billed'] or 0,
         'total_billed': total * price + advisor_billed,
         'received': paid * price,
         'pending': (total - paid) * price + advisor_billed,
@@ -151,9 +179,39 @@ def _sync_team_membership(cohort, student, team):
 # ---- detail ---------------------------------------------------------------
 
 class InstructorSimulationDetailView(APIView):
-    """Everything the detail and setup screens read for one simulation."""
+    """Everything the detail and setup screens read for one simulation, plus the
+    handful of settings faculty can change mid-run."""
 
     permission_classes = [IsAuthenticated, IsInstructor]
+
+    def patch(self, request, cohort_id):
+        """Re-price advisor time. Rates were previously set once at provisioning
+        and stuck there, which left faculty unable to correct a wrong number or
+        switch advisor time on partway through a term.
+
+        Hours already billed keep the rate snapshotted on their AdvisorSession,
+        so this changes what the *next* hour costs and never rewrites history.
+        """
+        cohort = _cohort_for(request, cohort_id)
+        if 'advisor_hourly_rate' not in request.data:
+            return Response({'detail': 'Nothing to update.'}, status=400)
+        raw = request.data.get('advisor_hourly_rate')
+        try:
+            rate = int(raw)
+        except (TypeError, ValueError):
+            return Response({'detail': 'The advisor rate must be a whole number.'}, status=400)
+        if not 0 <= rate <= 100000:
+            return Response({'detail': 'The advisor rate must be between 0 and 100000.'}, status=400)
+
+        previous = cohort.advisor_hourly_rate or 0
+        cohort.advisor_hourly_rate = rate
+        cohort.save(update_fields=['advisor_hourly_rate'])
+        enrollments = list(Enrollment.objects.filter(cohort=cohort))
+        return Response({
+            'advisor_hourly_rate': rate,
+            'previous_advisor_hourly_rate': previous,
+            'billing': _billing(cohort, enrollments),
+        })
 
     def get(self, request, cohort_id):
         cohort = _cohort_for(request, cohort_id)
@@ -561,11 +619,14 @@ class InstructorInsightsView(APIView):
             by_team.setdefault(inst.run.team_id, []).append(inst)
 
         advisor_usage = {
-            row['conversation__run__team_id']: row
+            row['team_id']: row
             for row in AdvisorSession.objects
-            .filter(conversation__run__team__cohort=cohort)
-            .values('conversation__run__team_id')
-            .annotate(hours=Count('id'), billed=Sum('hourly_rate'))
+            .for_cohort(cohort)
+            # A session hangs off one path or the other, so the team lives on
+            # whichever of the two is set.
+            .annotate(team_id=Coalesce('conversation__run__team_id', 'group_session__run__team_id'))
+            .values('team_id')
+            .annotate(hours=Count('id'), billed=Sum(BILLED))
         }
 
         dims = ['strategic_judgment', 'execution_consequence', 'coherence', 'deliverable_quality']
@@ -644,9 +705,12 @@ class InstructorFirmInsightsView(APIView):
 
         member_usage = {
             row['student_id']: row
-            for row in AdvisorSession.objects.filter(conversation__run__team=team)
+            for row in AdvisorSession.objects.for_team(team)
             .values('student_id')
-            .annotate(hours=Count('id'), billed=Sum('hourly_rate'))
+            .annotate(
+                hours=Count('id'), billed=Sum(BILLED),
+                group_hours=GROUP_HOURS, group_billed=GROUP_BILLED,
+            )
         }
         members = [
             {
@@ -655,6 +719,8 @@ class InstructorFirmInsightsView(APIView):
                 'email': u.email,
                 'advisor_hours': member_usage.get(u.id, {}).get('hours', 0) or 0,
                 'advisor_billed': member_usage.get(u.id, {}).get('billed', 0) or 0,
+                'group_hours': member_usage.get(u.id, {}).get('group_hours', 0) or 0,
+                'group_billed': member_usage.get(u.id, {}).get('group_billed', 0) or 0,
             }
             for u in team.members.all()
         ]
@@ -810,15 +876,24 @@ class InstructorStudentDetailView(APIView):
         sessions = (
             AdvisorSession.objects
             .filter(enrollment=enrollment)
-            .select_related('conversation__advisor')
+            .select_related('conversation__advisor', 'group_session')
             .order_by('-started_at')
         )
         session_rows = [
             {
-                'advisor': s.conversation.advisor.name,
-                'week': s.conversation.week_number,
+                'mode': 'group' if s.group_session_id else 'solo',
+                'advisor': (
+                    s.conversation.advisor.name if s.conversation_id
+                    else f'War room · {s.advisor_count} advisors'
+                ),
+                'week': (
+                    s.conversation.week_number if s.conversation_id
+                    else (s.group_session.week_number if s.group_session_id else None)
+                ),
                 'started_at': s.started_at.isoformat(),
                 'rate': s.hourly_rate,
+                'advisor_count': s.advisor_count,
+                'billed': s.billed,
             }
             for s in sessions
         ]
@@ -845,7 +920,11 @@ class InstructorStudentDetailView(APIView):
             },
             'advisor': {
                 'hours': len(session_rows),
-                'billed': sum(r['rate'] for r in session_rows),
+                # Per-row billed, not the raw rate: a war-room hour is charged
+                # once per advisor seated in it.
+                'billed': sum(r['billed'] for r in session_rows),
+                'group_hours': sum(1 for r in session_rows if r['mode'] == 'group'),
+                'group_billed': sum(r['billed'] for r in session_rows if r['mode'] == 'group'),
                 'sessions': session_rows,
             },
         })

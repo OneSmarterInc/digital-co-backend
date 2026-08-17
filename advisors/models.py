@@ -74,16 +74,49 @@ class Message(models.Model):
         return f'{self.role} message in {self.conversation_id}'
 
 
+class AdvisorSessionQuerySet(models.QuerySet):
+    """Sessions hang off either a 1:1 conversation or a war-room group, so every
+    scope filter has to look down both paths."""
+
+    def for_cohort(self, cohort):
+        return self.filter(
+            models.Q(conversation__run__team__cohort=cohort)
+            | models.Q(group_session__run__team__cohort=cohort)
+        )
+
+    def for_team(self, team):
+        return self.filter(
+            models.Q(conversation__run__team=team) | models.Q(group_session__run__team=team)
+        )
+
+
+# An hour costs the cohort rate once per advisor in the room: a 1:1 hour has an
+# advisor_count of 1, a four-advisor war-room hour bills four times the rate.
+BILLED = models.ExpressionWrapper(
+    models.F('hourly_rate') * models.F('advisor_count'),
+    output_field=models.IntegerField(),
+)
+
+
 class AdvisorSession(models.Model):
     """One billed hour of advisor time.
 
-    A student's first message to an advisor opens a session billed at the
-    cohort's advisor_hourly_rate; further messages within the next hour ride
-    along free, and the first message after that hour opens (and bills) a new
-    session. The rate is snapshotted here so changing a cohort's rate later
-    doesn't rewrite billing history.
+    A student's first message opens a session billed at the cohort's
+    advisor_hourly_rate; further messages within the next hour ride along free,
+    and the first message after that hour opens (and bills) a new session. The
+    rate is snapshotted here so changing a cohort's rate later doesn't rewrite
+    billing history.
+
+    Exactly one of conversation / group_session is set. A war-room hour is
+    charged per advisor seated in the room — advisor_count carries how many, so
+    the amount owed is hourly_rate * advisor_count rather than the raw rate.
     """
-    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name='sessions')
+    conversation = models.ForeignKey(
+        Conversation, on_delete=models.CASCADE, related_name='sessions', null=True, blank=True,
+    )
+    group_session = models.ForeignKey(
+        'GroupSession', on_delete=models.CASCADE, related_name='sessions', null=True, blank=True,
+    )
     student = models.ForeignKey('core.User', on_delete=models.CASCADE, related_name='advisor_sessions')
     enrollment = models.ForeignKey(
         'core.Enrollment',
@@ -93,14 +126,22 @@ class AdvisorSession(models.Model):
         related_name='advisor_sessions',
     )
     hourly_rate = models.PositiveIntegerField(default=0)
+    advisor_count = models.PositiveSmallIntegerField(default=1)
     started_at = models.DateTimeField(auto_now_add=True)
     last_activity_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AdvisorSessionQuerySet.as_manager()
 
     class Meta:
         ordering = ['-started_at']
 
+    @property
+    def billed(self):
+        return (self.hourly_rate or 0) * (self.advisor_count or 1)
+
     def __str__(self):
-        return f'{self.student} hour in {self.conversation_id} @ {self.hourly_rate}'
+        where = f'conversation {self.conversation_id}' if self.conversation_id else f'group {self.group_session_id}'
+        return f'{self.student} hour in {where} @ {self.hourly_rate} x{self.advisor_count}'
 
 
 class GroupSession(models.Model):
@@ -111,7 +152,8 @@ class GroupSession(models.Model):
     rather than overloading it: a group turn's speaker can be the student OR any
     one of several advisors in the same thread, so there's no single fixed
     advisor. The active roster is stored as a list of AdvisorDefinition keys
-    (e.g. 'diane_brandt'); the group is unbilled, so there's no AdvisorSession.
+    (e.g. 'diane_brandt'). A room is billed like a 1:1 hour, once per advisor
+    seated in it — see AdvisorSession.advisor_count.
     """
     run = models.ForeignKey('core.Run', on_delete=models.CASCADE, related_name='group_sessions')
     week_number = models.PositiveSmallIntegerField()
