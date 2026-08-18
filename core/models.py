@@ -37,6 +37,11 @@ class User(AbstractUser):
     )
 
 
+# Dollars per started hour of advisor time, for a cohort nobody has priced by
+# hand. Instructors can still change it per cohort.
+DEFAULT_ADVISOR_HOURLY_RATE = 300
+
+
 class Cohort(models.Model):
     name = models.CharField(max_length=255)
     tier = models.CharField(
@@ -54,7 +59,14 @@ class Cohort(models.Model):
     days_per_week = models.PositiveSmallIntegerField(default=7)      # phase pacing
     enrollment_capacity = models.PositiveIntegerField(default=30)    # max students
     price_per_student = models.PositiveIntegerField(default=0)       # billing rate, 0 = free
-    advisor_hourly_rate = models.PositiveIntegerField(default=0)     # per started hour of advisor chat, 0 = included
+    # Per started hour of advisor chat. A war-room hour bills this once per
+    # advisor in the room, so four advisors for an hour is 4x this figure.
+    #
+    # This defaults to the real rate rather than 0 on purpose: advisor scarcity
+    # is what forces triage, and the war-room UI only shows cost when the rate
+    # is above zero. A cohort created with 0 would look like it was working
+    # while quietly making consultation free.
+    advisor_hourly_rate = models.PositiveIntegerField(default=DEFAULT_ADVISOR_HOURLY_RATE)
     registration_token = models.CharField(max_length=64, blank=True, default='')
     round_extensions = models.JSONField(default=dict, blank=True)  # {round_number: extra_days} added when a round is extended
     instructors = models.ManyToManyField(

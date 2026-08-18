@@ -15,7 +15,9 @@ from django.db.models import Count, Sum
 from advisors.models import (
     BILLED, AdvisorDefinition, AdvisorSession, Conversation, GroupSession,
 )
-from core.models import Cohort, Enrollment, Run, Team, Tier, User, UserRole
+from core.models import (
+    DEFAULT_ADVISOR_HOURLY_RATE, Cohort, Enrollment, Run, Team, Tier, User, UserRole,
+)
 from core.state import SCORE_DIMENSIONS
 from engine.services import submit_week, view_briefing
 from weeks.tests import week1_payload
@@ -26,8 +28,8 @@ from .instructor_api import (
     InstructorSimulationDetailView, _advisor_usage_by_student, _billing,
 )
 from .views import (
-    GroupConversationView, InstructorQueueView, InstructorScoreView, RunView,
-    resolve_run, run_for_user,
+    AdminSimulationsView, GroupConversationView, InstructorQueueView,
+    InstructorScoreView, RunView, resolve_run, run_for_user,
 )
 
 
@@ -314,3 +316,45 @@ class InstructorScoreEndpointTests(TestCase):
         record.refresh_from_db()
         for dimension in SCORE_DIMENSIONS:
             self.assertEqual(getattr(record, dimension), auto.get(dimension, 0))
+
+
+class AdvisorRateDefaultTests(TestCase):
+    """A cohort nobody prices by hand must still cost something.
+
+    The war-room UI only shows cost when the rate is above zero, so a cohort
+    defaulting to 0 would look like it was working while quietly making
+    consultation free — and advisor scarcity is what forces triage.
+    """
+
+    def test_new_cohort_defaults_to_the_real_rate(self):
+        cohort = Cohort.objects.create(name='SIM-DEFAULT', tier=Tier.UNDERGRAD)
+        self.assertEqual(cohort.advisor_hourly_rate, DEFAULT_ADVISOR_HOURLY_RATE)
+        self.assertEqual(cohort.advisor_hourly_rate, 300)
+
+    def test_cohort_created_through_the_admin_endpoint_gets_the_rate(self):
+        admin = User.objects.create_user(
+            username='admin@example.com', password='pw', role=UserRole.INSTRUCTOR,
+            is_staff=True, is_superuser=True,
+        )
+        request = APIRequestFactory().post(
+            '/api/admin/simulations/', {'name': 'SIM-NEW', 'tier': Tier.UNDERGRAD}, format='json',
+        )
+        force_authenticate(request, user=admin)
+        resp = AdminSimulationsView.as_view()(request)
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(
+            Cohort.objects.get(name='SIM-NEW').advisor_hourly_rate, DEFAULT_ADVISOR_HOURLY_RATE,
+        )
+
+    def test_a_four_advisor_room_hour_bills_four_times_the_rate(self):
+        cohort = Cohort.objects.create(name='SIM-ROOM4', tier=Tier.UNDERGRAD)
+        student = User.objects.create_user(username='room4@example.com', password='pw', role=UserRole.STUDENT)
+        team = Team.objects.create(cohort=cohort, name='Team 1')
+        team.members.add(student)
+        Enrollment.objects.create(cohort=cohort, student=student, team=team)
+        run = Run.objects.create(team=team, current_week=1)
+        room = GroupSession.objects.create(
+            run=run, week_number=1, active_advisors=['a', 'b', 'c', 'd'],
+        )
+        billed = GroupConversationView._meter_group_session(student, run, room)
+        self.assertEqual(billed.billed, 1200)

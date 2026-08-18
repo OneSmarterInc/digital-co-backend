@@ -26,7 +26,9 @@ from advisors.models import (
 from advisors.services import (
     AdvisorService, GroupAdvisorService, MAX_GROUP_ADVISORS, MIN_GROUP_ADVISORS,
 )
-from core.models import Cohort, Enrollment, Run, RunStatus, Team, Tier, User, UserRole
+from core.models import (
+    DEFAULT_ADVISOR_HOURLY_RATE, Cohort, Enrollment, Run, RunStatus, Team, Tier, User, UserRole,
+)
 from core.state import SCORE_DIMENSIONS
 from engine.climax import generate_debrief
 from help.services import HelpService
@@ -717,7 +719,10 @@ class AdminSimulationsView(APIView):
         team_size = clamped_int('team_size', 4, 1, 12)
         enrollment_capacity = clamped_int('enrollment_capacity', 30, 1, 1000)
         price_per_student = clamped_int('price_per_student', 0, 0, 100000)
-        advisor_hourly_rate = clamped_int('advisor_hourly_rate', 0, 0, 100000)
+        # Defaults to the real rate, not 0 — see Cohort.advisor_hourly_rate.
+        advisor_hourly_rate = clamped_int(
+            'advisor_hourly_rate', DEFAULT_ADVISOR_HOURLY_RATE, 0, 100000,
+        )
 
         cohort = Cohort.objects.create(
             name=name,
