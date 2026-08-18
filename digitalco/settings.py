@@ -30,7 +30,11 @@ SECRET_KEY = 'django-insecure-7nq43usz8+%#a%okz_(dnjr##o_k0qy@*8kv9cc@r66-!a)p)z
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    "erp.flexee.org",
+    "localhost",
+    "127.0.0.1",
+]
 
 
 # Application definition
@@ -48,7 +52,6 @@ INSTALLED_APPS = [
     'engine',
     'scoring',
     'web',
-    'help',
 ]
 
 MIDDLEWARE = [
@@ -147,7 +150,7 @@ import os
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", SECRET_KEY)
 DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
-ALLOWED_HOSTS = [h for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",") if h]
+
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Section 7 un-stub: select a real advisor provider via the environment.
@@ -177,6 +180,6 @@ SIMPLE_JWT = {
 # Authorization header, so no cookies are shared. Set CORS_ALLOWED_ORIGINS for prod.
 CORS_ALLOWED_ORIGINS = [
     o for o in os.environ.get(
-        'CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000'
+        'CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000,https://digital-co-ui.vercel.app,https://mis.flexee.org'
     ).split(',') if o
 ]
