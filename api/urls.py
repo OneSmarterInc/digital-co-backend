@@ -30,6 +30,9 @@ urlpatterns = [
     # before the <int:advisor_id> routes; 'group' can't match an int converter
     # anyway, but keeping them adjacent makes the advisor surface easy to read.
     path('advisors/group/', views.GroupConversationView.as_view(), name='advisor_group'),
+
+    # Help window's ASK box -> the starved help channel (help/prompts.py).
+    path('help/ask/', views.HelpAskView.as_view(), name='help_ask'),
     path('advisors/group/start/', views.GroupStartView.as_view(), name='advisor_group_start'),
     path('advisors/<int:advisor_id>/', views.AdvisorConversationView.as_view(), name='advisor'),
     path('advisors/<int:advisor_id>/image/', views.AdvisorImageView.as_view(), name='advisor_image'),

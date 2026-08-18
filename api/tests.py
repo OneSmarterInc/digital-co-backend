@@ -16,6 +16,9 @@ from advisors.models import (
     BILLED, AdvisorDefinition, AdvisorSession, Conversation, GroupSession,
 )
 from core.models import Cohort, Enrollment, Run, Team, Tier, User, UserRole
+from core.state import SCORE_DIMENSIONS
+from engine.services import submit_week, view_briefing
+from weeks.tests import week1_payload
 from scoring.models import ScoreRecord
 from weeks.models import Submission, WeekInstance, WeekInstanceStatus
 
@@ -23,7 +26,8 @@ from .instructor_api import (
     InstructorSimulationDetailView, _advisor_usage_by_student, _billing,
 )
 from .views import (
-    GroupConversationView, InstructorQueueView, RunView, resolve_run, run_for_user,
+    GroupConversationView, InstructorQueueView, InstructorScoreView, RunView,
+    resolve_run, run_for_user,
 )
 
 
@@ -265,3 +269,48 @@ class AdvisorRateEditTests(TestCase):
         self.assertEqual(self._patch({'advisor_hourly_rate': 1}, user=outsider).status_code, 404)
         self.cohort.refresh_from_db()
         self.assertEqual(self.cohort.advisor_hourly_rate, 100)
+
+
+class InstructorScoreEndpointTests(TestCase):
+    """The wire path the grading modal actually uses. Posting a zero adjustment
+    must record the engine's proposal, not double it.
+    """
+
+    def setUp(self):
+        self.instructor = User.objects.create_user(
+            username='grader@example.com', password='pw', role=UserRole.INSTRUCTOR,
+        )
+        self.student = User.objects.create_user(
+            username='graded@example.com', password='pw', role=UserRole.STUDENT,
+        )
+        cohort = Cohort.objects.create(name='SIM-SCORE', tier=Tier.UNDERGRAD)
+        cohort.instructors.add(self.instructor)
+        team = Team.objects.create(cohort=cohort, name='Team 1')
+        team.members.add(self.student)
+        self.run = Run.objects.create(team=team)
+
+    def test_zero_adjustment_posts_the_engine_score_unchanged(self):
+        instance = view_briefing(self.run)
+        submit_week(
+            instance,
+            structured_payload=week1_payload(),
+            deliverable_text='A rigorous current-state memo with a 30-60-90 plan.',
+            submitted_by=self.student,
+        )
+        instance.refresh_from_db()
+        record = instance.score_record
+        auto = dict(record.auto_components['scores'])
+        self.assertTrue(any(auto.get(d) for d in SCORE_DIMENSIONS))
+
+        request = APIRequestFactory().post(
+            f'/api/instructor/score/{record.id}/',
+            {'scores': {d: 0 for d in SCORE_DIMENSIONS}, 'anchor_strength': 'adequate'},
+            format='json',
+        )
+        force_authenticate(request, user=self.instructor)
+        resp = InstructorScoreView.as_view()(request, score_id=record.id)
+        self.assertEqual(resp.status_code, 200)
+
+        record.refresh_from_db()
+        for dimension in SCORE_DIMENSIONS:
+            self.assertEqual(getattr(record, dimension), auto.get(dimension, 0))

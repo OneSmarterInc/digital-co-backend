@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'engine',
     'scoring',
     'web',
+    'help',
 ]
 
 MIDDLEWARE = [

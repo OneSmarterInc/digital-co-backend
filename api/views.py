@@ -29,6 +29,7 @@ from advisors.services import (
 from core.models import Cohort, Enrollment, Run, RunStatus, Team, Tier, User, UserRole
 from core.state import SCORE_DIMENSIONS
 from engine.climax import generate_debrief
+from help.services import HelpService
 from engine.services import (
     InvalidTransition, get_or_create_week_instance, submit_week, view_briefing,
 )
@@ -939,3 +940,27 @@ class InstructorDeployStudentsView(APIView):
             cohort.deployed_for_students_at = dj_timezone.now()
             cohort.save(update_fields=['deployed_for_students_at'])
         return Response(_instructor_cohort_row(cohort))
+
+class HelpAskView(APIView):
+    """The 'Something else' box in the help window.
+
+    Deliberately thin: it takes a question, hands it to the starved help channel,
+    and returns the answer. Nothing is stored — see help/services.py — and the
+    channel's prompt carries no scenario content, so there is nothing here for a
+    student to extract by asking cleverly.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        question = (request.data.get('question') or '').strip()
+        if not question:
+            return Response({'detail': 'Ask a question first.'}, status=400)
+        try:
+            answer = HelpService().answer(question)
+        except Exception:
+            return Response(
+                {'detail': "The help channel isn't reachable right now. The FAQ above covers most of it."},
+                status=503,
+            )
+        return Response({'answer': answer})

@@ -1,6 +1,7 @@
 from django.test import TestCase
 
 from core.models import Cohort, Run, Team, Tier, User
+from core.state import SCORE_DIMENSIONS
 from engine.services import submit_week, view_briefing
 from scoring.models import Benchmark
 from scoring.services import reveal_benchmark, student_benchmark_payload
@@ -2197,6 +2198,67 @@ class WeekLifecycleTests(TestCase):
         self.run.refresh_from_db()
         self.run.current_week = 14
         self.run.save()
+
+
+class InstructorGradingDoesNotDoubleTests(TestCase):
+    """Regression guard for the grade double-count.
+
+    The instructor's dimension inputs are an ADJUSTMENT: merge_score_components
+    adds them on top of the engine's proposal. The grading modal used to pre-fill
+    those inputs with the engine's own numbers, so an instructor who agreed with
+    the engine and hit save submitted auto as the adjustment and recorded
+    auto + auto — every graded score came out at exactly double.
+
+    Submitting all zeros must record the engine's proposal unchanged, in both the
+    score record and the run's accumulated totals.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='grader-student', password='pw')
+        self.cohort = Cohort.objects.create(name='SIM-GRADE', tier=Tier.UNDERGRAD)
+        self.team = Team.objects.create(cohort=self.cohort, name='Team A')
+        self.team.members.add(self.user)
+        self.run = Run.objects.create(team=self.team)
+
+    def _submitted_record(self):
+        instance = view_briefing(self.run)
+        submit_week(
+            instance,
+            structured_payload=week1_payload(),
+            deliverable_text='A rigorous current-state memo with a 30-60-90 plan.',
+            submitted_by=self.user,
+        )
+        instance.refresh_from_db()
+        return instance.score_record
+
+    def test_zero_adjustment_records_the_engine_proposal(self):
+        record = self._submitted_record()
+        auto = dict(record.auto_components['scores'])
+        # Guard the guard: a run where the engine proposed nothing would pass
+        # this test even while doubled.
+        self.assertTrue(any(auto.get(d) for d in SCORE_DIMENSIONS))
+
+        finalize_score(record, instructor_scores={d: 0 for d in SCORE_DIMENSIONS})
+        record.refresh_from_db()
+        for dimension in SCORE_DIMENSIONS:
+            self.assertEqual(getattr(record, dimension), auto.get(dimension, 0))
+
+    def test_zero_adjustment_does_not_double_accumulated_totals(self):
+        record = self._submitted_record()
+        auto = dict(record.auto_components['scores'])
+        finalize_score(record, instructor_scores={d: 0 for d in SCORE_DIMENSIONS})
+        self.run.refresh_from_db()
+        for dimension in SCORE_DIMENSIONS:
+            self.assertEqual(
+                self.run.state['accumulated_scores'][dimension], auto.get(dimension, 0)
+            )
+
+    def test_an_adjustment_still_lands_on_top_of_the_engine_score(self):
+        record = self._submitted_record()
+        auto = dict(record.auto_components['scores'])
+        finalize_score(record, instructor_scores={'coherence': 2})
+        record.refresh_from_db()
+        self.assertEqual(record.coherence, auto.get('coherence', 0) + 2)
 
 
 def week1_payload():
