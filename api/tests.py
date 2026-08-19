@@ -676,7 +676,10 @@ class AdminCreateFacultyTests(TestCase):
         force_authenticate(request, user=user or self.admin)
         return AdminFacultyView.as_view()(request)
 
-    def test_creating_faculty_returns_a_one_time_password(self):
+    def test_creating_faculty_emails_a_set_password_link(self):
+        """No password is ever generated here. The instructor chooses their own
+        from an emailed link, so nobody else ever knows it — an admin reading a
+        generated password aloud is a credential in the clear."""
         resp = self._post({'email': 'New.Prof@Example.com', 'first_name': 'Ada', 'last_name': 'Byron'})
         self.assertEqual(resp.status_code, 201)
 
@@ -685,12 +688,8 @@ class AdminCreateFacultyTests(TestCase):
         self.assertEqual(user.first_name, 'Ada')
         self.assertEqual(resp.data['name'], 'Ada Byron')
 
-        temp = resp.data['temp_password']
-        self.assertEqual(len(temp), 16)
-        # It is a real credential, not a placeholder.
-        self.assertTrue(user.check_password(temp))
-        # And it is not recoverable — nothing stores it in the clear.
-        self.assertNotIn(temp, user.password)
+        self.assertNotIn('temp_password', resp.data)
+        self.assertFalse(user.has_usable_password())
 
     def test_the_new_instructor_can_be_assigned_to_a_cohort(self):
         created = self._post({'email': 'teach@example.com', 'first_name': 'Grace'})

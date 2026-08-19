@@ -18,6 +18,7 @@ from rest_framework.views import APIView
 from core.models import (
     Cohort, Enrollment, Invitation, InvitationStatus, User, UserRole,
 )
+from mailer.enrolment import send_enrolment_confirmation
 
 MIN_PASSWORD_LENGTH = 8
 
@@ -141,6 +142,11 @@ class InviteAcceptView(APIView):
             locked.accepted_at = timezone.now()
             locked.accepted_by = user
             locked.save(update_fields=['status', 'accepted_at', 'accepted_by'])
+
+        # Outside the transaction: a mail failure must not roll back a real
+        # enrolment. Most students land here unplaced, and this is what tells
+        # them that is expected rather than broken.
+        send_enrolment_confirmation(user, cohort, team)
 
         return Response({
             'cohort_id': cohort.id,
@@ -279,6 +285,8 @@ class RegistrationAcceptView(APIView):
             ).update(
                 status=InvitationStatus.ACCEPTED, accepted_at=timezone.now(), accepted_by=user,
             )
+
+        send_enrolment_confirmation(user, cohort, team)
 
         return Response({
             'cohort_id': cohort.id,

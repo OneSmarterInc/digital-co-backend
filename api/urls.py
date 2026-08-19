@@ -1,7 +1,7 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from . import invite_api, views
+from . import account_api, invite_api, views
 from . import instructor_api
 from . import student_api
 app_name = 'api'
@@ -43,6 +43,9 @@ urlpatterns = [
     # has always generated /register/<token>; nothing served it until now.
     path('register/<str:token>/', invite_api.RegistrationDetailView.as_view(), name='registration_detail'),
     path('register/<str:token>/accept/', invite_api.RegistrationAcceptView.as_view(), name='registration_accept'),
+
+    # Choosing a password from an emailed link (new faculty, and resets).
+    path('set-password/<str:uidb64>/<str:token>/', account_api.SetPasswordView.as_view(), name='set_password'),
     path('advisors/group/start/', views.GroupStartView.as_view(), name='advisor_group_start'),
     path('advisors/<int:advisor_id>/', views.AdvisorConversationView.as_view(), name='advisor'),
     path('advisors/<int:advisor_id>/image/', views.AdvisorImageView.as_view(), name='advisor_image'),

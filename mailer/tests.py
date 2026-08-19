@@ -306,3 +306,121 @@ class SelfRegistrationTests(MailerTestCase):
         resp = self._join(email='not-an-email')
         self.assertEqual(resp.status_code, 400)
         self.assertIn('email', resp.data['errors'])
+
+
+class FacultySetPasswordTests(TestCase):
+    """New instructors choose their own password from an emailed link, rather
+    than an admin generating one and reading it out."""
+
+    def setUp(self):
+        self.outbox = LocmemBackend()
+        backends.set_backend(self.outbox)
+        self.addCleanup(backends.set_backend, None)
+        self.admin = User.objects.create_user(
+            username='root2@example.com', password='pw', role=UserRole.INSTRUCTOR,
+            is_staff=True, is_superuser=True, first_name='Root',
+        )
+
+    def _create(self, email='newprof@example.com'):
+        from api.views import AdminFacultyView
+        request = APIRequestFactory().post(
+            '/x', {'email': email, 'first_name': 'Ada', 'last_name': 'Byron'}, format='json',
+        )
+        force_authenticate(request, user=self.admin)
+        return AdminFacultyView.as_view()(request)
+
+    def _link_from_outbox(self):
+        text = self.outbox.outbox[-1].text
+        return [w for w in text.split() if '/set-password/' in w][0]
+
+    def test_the_account_has_no_password_and_the_link_is_emailed(self):
+        resp = self._create()
+        self.assertEqual(resp.status_code, 201)
+        self.assertTrue(resp.data['invite_sent'])
+        self.assertNotIn('temp_password', resp.data)
+
+        user = User.objects.get(username='newprof@example.com')
+        self.assertFalse(user.has_usable_password())
+        self.assertEqual(len(self.outbox.outbox), 1)
+        self.assertIn('/set-password/', self.outbox.outbox[0].text)
+
+    def test_following_the_link_sets_a_password_once(self):
+        from api.account_api import SetPasswordView
+        self._create()
+        uid, token = self._link_from_outbox().rstrip('/').split('/set-password/')[1].split('/')
+
+        detail = SetPasswordView.as_view()(APIRequestFactory().get('/x'), uidb64=uid, token=token)
+        self.assertEqual(detail.status_code, 200)
+        self.assertFalse(detail.data['has_password'])
+
+        ok = SetPasswordView.as_view()(
+            APIRequestFactory().post(
+                '/x', {'password': 'correct-horse-battery', 'password_confirm': 'correct-horse-battery'},
+                format='json',
+            ), uidb64=uid, token=token,
+        )
+        self.assertEqual(ok.status_code, 200)
+
+        user = User.objects.get(username='newprof@example.com')
+        self.assertTrue(user.check_password('correct-horse-battery'))
+
+        # The token was derived from the old hash, so the link is spent.
+        again = SetPasswordView.as_view()(APIRequestFactory().get('/x'), uidb64=uid, token=token)
+        self.assertEqual(again.status_code, 404)
+
+    def test_a_short_password_is_rejected_per_field(self):
+        from api.account_api import SetPasswordView
+        self._create()
+        uid, token = self._link_from_outbox().rstrip('/').split('/set-password/')[1].split('/')
+        resp = SetPasswordView.as_view()(
+            APIRequestFactory().post('/x', {'password': 'abc', 'password_confirm': 'abc'}, format='json'),
+            uidb64=uid, token=token,
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('password', resp.data['errors'])
+
+    def test_a_failed_send_returns_the_link_so_the_admin_is_not_stuck(self):
+        backends.set_backend(LocmemBackend(fail_with='smtp down'))
+        resp = self._create('unreachable@example.com')
+        self.assertEqual(resp.status_code, 201)
+        self.assertFalse(resp.data['invite_sent'])
+        self.assertIn('/set-password/', resp.data['set_password_url'])
+
+
+class EnrolmentConfirmationTests(MailerTestCase):
+    """A student who accepts and lands unplaced is told that is expected."""
+
+    def _accept(self, invitation):
+        from api.invite_api import InviteAcceptView
+        return InviteAcceptView.as_view()(
+            APIRequestFactory().post('/x', {
+                'first_name': 'Grace', 'password': 'correct-horse', 'password_confirm': 'correct-horse',
+            }, format='json'),
+            token=invitation.token,
+        )
+
+    def test_an_unplaced_student_is_told_to_watch_the_tour(self):
+        invitation = self._invitation(team=None)
+        self.assertEqual(self._accept(invitation).status_code, 201)
+
+        body = self.outbox.outbox[-1]
+        self.assertIn('enrolled in SIM-INVITE', body.subject)
+        self.assertIn('not been placed in a firm yet', body.text)
+        self.assertIn('watch the opening tour', body.text)
+        # No scenario content in the first mail a student receives.
+        for leak in ('calloway', 's/4hana', 'trap'):
+            self.assertNotIn(leak, (body.text + body.html).lower())
+
+    def test_a_placed_student_is_told_their_firm_instead(self):
+        invitation = self._invitation(team=self.team)
+        self._accept(invitation)
+
+        body = self.outbox.outbox[-1]
+        self.assertIn('Team 1', body.text)
+        self.assertNotIn('not been placed', body.text)
+
+    def test_a_mail_failure_does_not_undo_the_enrolment(self):
+        backends.set_backend(LocmemBackend(fail_with='mailbox full'))
+        invitation = self._invitation(team=None)
+        self.assertEqual(self._accept(invitation).status_code, 201)
+        self.assertTrue(Enrollment.objects.filter(cohort=self.cohort).exists())

@@ -33,6 +33,7 @@ from core.models import (
 from core.state import SCORE_DIMENSIONS
 from engine.climax import generate_debrief
 from help.services import HelpService
+from mailer.accounts import send_faculty_invite
 from engine.services import (
     InvalidTransition, get_or_create_week_instance, submit_week, view_briefing,
 )
@@ -824,15 +825,15 @@ class AdminFacultyView(APIView):
     """Create an instructor account.
 
     The admin console could list faculty but not add any, so provisioning a
-    cohort for a new lecturer meant a shell command first. Same one-time
-    temporary-password pattern the student reset already uses: generated
-    server-side, shown once, never retrievable again.
+    cohort for a new lecturer meant a shell command first.
+
+    The account is created with no usable password and the instructor is emailed
+    a link to choose their own. Nobody else ever knows it — an admin reading a
+    generated password aloud, or pasting it into chat, is a credential in the
+    clear that then lives in someone's notes.
     """
 
     permission_classes = [IsAuthenticated, IsAdmin]
-
-    # Unambiguous alphabet — these get read aloud or typed from a note.
-    ALPHABET = 'abcdefghjkmnpqrstuvwxyzACDEFGHJKLMNPQRSTUVWXYZ2345679'
 
     def post(self, request):
         errors = {}
@@ -856,18 +857,20 @@ class AdminFacultyView(APIView):
                 {'detail': 'Some fields need attention.', 'errors': errors}, status=400,
             )
 
-        temp_password = ''.join(secrets.choice(self.ALPHABET) for _ in range(16))
         user = User.objects.create_user(
-            username=email, email=email, password=temp_password,
+            username=email, email=email, password=None,
             first_name=first_name, last_name=last_name, role=UserRole.INSTRUCTOR,
         )
+        sent, url, error = send_faculty_invite(user, invited_by=request.user)
         return Response({
             'id': user.id,
             'username': user.username,
             'email': user.email,
             'name': (user.get_full_name() or user.username),
-            # Shown once. There is no way to read it back.
-            'temp_password': temp_password,
+            'invite_sent': sent,
+            # If the mail did not go, hand the admin the link so they are not
+            # stuck with an account nobody can sign in to.
+            **({'set_password_url': url, 'send_error': error} if not sent else {}),
         }, status=201)
 
 
