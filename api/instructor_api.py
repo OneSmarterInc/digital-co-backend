@@ -26,6 +26,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from advisors.models import BILLED, AdvisorSession
+from mailer.invites import send_invitation
 from core.models import (
     Cohort, Enrollment, Invitation, InvitationStatus, Run, RunStatus, Team, User, UserRole,
 )
@@ -287,7 +288,15 @@ class InstructorAdvanceRoundView(APIView):
 # ---- invitations ----------------------------------------------------------
 
 def _invite_json(inv):
-    return {'id': str(inv.id), 'email': inv.email, 'status': inv.status}
+    return {
+        'id': str(inv.id),
+        'email': inv.email,
+        'status': inv.status,
+        # An instructor needs to see who actually received the mail, not just
+        # who was added to the list.
+        'sent_at': inv.sent_at.isoformat() if inv.sent_at else None,
+        'send_error': inv.send_error,
+    }
 
 
 class InstructorInvitationsView(APIView):
@@ -314,8 +323,16 @@ class InstructorInviteView(APIView):
             email=email,
             defaults={'token': secrets.token_urlsafe(24), 'invited_by': request.user},
         )
-        # message is accepted for the eventual email; delivery is wired separately.
-        return Response(_invite_json(inv), status=201 if created else 200)
+        # Send on create, and on re-invite of an unsent one — an instructor
+        # clicking invite twice means "this person still hasn't got it".
+        sent, detail = (False, 'Already sent.')
+        if created or not inv.sent_at:
+            sent, detail = send_invitation(inv)
+        body = _invite_json(inv)
+        body['sent'] = bool(inv.sent_at)
+        if not sent and not inv.sent_at:
+            body['send_error'] = detail
+        return Response(body, status=201 if created else 200)
 
 
 class InstructorBulkInviteView(APIView):
@@ -345,19 +362,24 @@ class InstructorBulkInviteView(APIView):
                 skipped.append({'row': row_no, 'email': email, 'detail': 'Duplicate in file'})
                 continue
             seen.add(email)
-            _, created = Invitation.objects.get_or_create(
+            invitation, created = Invitation.objects.get_or_create(
                 cohort=cohort,
                 email=email,
                 defaults={'token': secrets.token_urlsafe(24), 'invited_by': request.user},
             )
             if created:
-                invited.append({'row': row_no, 'email': email, 'created': True})
+                sent, detail = send_invitation(invitation)
+                invited.append({
+                    'row': row_no, 'email': email, 'created': True,
+                    'sent': sent, **({'send_error': detail} if not sent else {}),
+                })
             else:
                 skipped.append({'row': row_no, 'email': email, 'detail': 'Already invited'})
 
         return Response({
             'summary': {
                 'invited': len(invited),
+                'sent': sum(1 for r in invited if r.get('sent')),
                 'skipped': len(skipped),
                 'errors': len(errors),
                 'rows': len(rows),
@@ -366,6 +388,31 @@ class InstructorBulkInviteView(APIView):
             'skipped': skipped,
             'errors': errors,
         })
+
+
+class InstructorInviteResendView(APIView):
+    """Send an outstanding invitation again.
+
+    Rotates the token, so an old forwarded link stops working — a resend is
+    usually prompted by "I never got it", and the previous link may be sitting
+    in a spam folder or someone else's inbox.
+    """
+
+    permission_classes = [IsAuthenticated, IsInstructor]
+
+    def post(self, request, cohort_id, invitation_id):
+        cohort = _cohort_for(request, cohort_id)
+        invitation = get_object_or_404(Invitation, id=invitation_id, cohort=cohort)
+        if invitation.status != InvitationStatus.PENDING:
+            return Response(
+                {'detail': 'That invitation has already been accepted.'}, status=409,
+            )
+        invitation.token = secrets.token_urlsafe(24)
+        invitation.save(update_fields=['token'])
+        sent, detail = send_invitation(invitation)
+        if not sent:
+            return Response({'detail': detail, **_invite_json(invitation)}, status=502)
+        return Response(_invite_json(invitation))
 
 
 class InstructorBulkInviteTemplateView(APIView):

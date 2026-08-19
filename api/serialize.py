@@ -144,4 +144,17 @@ def score_record_json(score):
         # never grades blind. Additive; nothing existing changes shape.
         'deliverable_text': submission.deliverable_text if submission else '',
         'decisions': submission.structured_payload if submission else {},
+        # Graded weeks leave the queue, and the written answers were then
+        # unreachable — but Week 13's board audit and the Week 14 debrief both
+        # need them read back weeks later, as does any grade query. Carry the
+        # grading record so a graded week can be reopened read-only.
+        'graded_at': score.graded_at.isoformat() if score.graded_at else None,
+        'graded_by': (
+            (score.graded_by.get_full_name() or score.graded_by.username)
+            if score.graded_by_id else None
+        ),
+        'anchor_strength': (
+            instance.run.state.get('through_lines', {}).get('coherence', {}).get('anchor_strength')
+        ),
+        'coherence_anchor': instance.run.state.get('coherence_anchor', ''),
     }

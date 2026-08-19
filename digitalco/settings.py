@@ -156,6 +156,22 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 # Section 7 un-stub: select a real advisor provider via the environment.
 DIGITALCO_LLM_PROVIDER = os.environ.get("DIGITALCO_LLM_PROVIDER", "echo")
 
+# ---- email -----------------------------------------------------------------
+# Defaults to "console" on purpose: a checkout without credentials prints
+# invites rather than appearing to send them. Set MAIL_BACKEND=mailjet in .env
+# to actually deliver.
+MAIL_BACKEND = os.environ.get("MAIL_BACKEND", "console")
+MAILJET_API_KEY = os.environ.get("MAILJET_API_KEY", "")
+MAILJET_API_SECRET = os.environ.get("MAILJET_API_SECRET", "")
+MAIL_FROM_ADDRESS = os.environ.get("MAIL_FROM_ADDRESS", "")
+MAIL_FROM_NAME = os.environ.get("MAIL_FROM_NAME", "FLEXEE · DigitalCo")
+# Where invite and registration links point. Defaults to production, not
+# localhost: a deployment that forgets this variable would otherwise email every
+# student a link to their own machine, and the failure is silent — the mail
+# sends, the link is simply dead. A dev checkout overrides it in .env, and
+# sends to the console by default anyway.
+FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "https://mis.flexee.org")
+
 # --- API layer (DRF + JWT + CORS) for the Next.js frontend ---
 from datetime import timedelta
 

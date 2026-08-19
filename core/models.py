@@ -173,6 +173,10 @@ class Invitation(models.Model):
         choices=InvitationStatus.choices,
         default=InvitationStatus.PENDING,
     )
+    # Delivery is recorded so an instructor can see who actually received the
+    # email rather than only who was added to the list.
+    sent_at = models.DateTimeField(null=True, blank=True)
+    send_error = models.CharField(max_length=500, blank=True, default='')
     invited_by = models.ForeignKey(
         User,
         related_name='invitations_sent',

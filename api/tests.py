@@ -331,20 +331,37 @@ class AdvisorRateDefaultTests(TestCase):
         self.assertEqual(cohort.advisor_hourly_rate, DEFAULT_ADVISOR_HOURLY_RATE)
         self.assertEqual(cohort.advisor_hourly_rate, 300)
 
-    def test_cohort_created_through_the_admin_endpoint_gets_the_rate(self):
+    def test_the_admin_endpoint_will_not_create_a_cohort_without_a_rate(self):
+        """The create endpoint now requires the rate rather than defaulting it.
+
+        That is deliberately stricter than the model default: a rate quietly
+        applied on the server is a rate nobody chose, and the failure mode —
+        free consultation that looks like it is working — is the one we care
+        about. The admin form pre-fills 300, so the rate is always a visible,
+        deliberate figure by the time it reaches here.
+        """
         admin = User.objects.create_user(
             username='admin@example.com', password='pw', role=UserRole.INSTRUCTOR,
             is_staff=True, is_superuser=True,
         )
-        request = APIRequestFactory().post(
-            '/api/admin/simulations/', {'name': 'SIM-NEW', 'tier': Tier.UNDERGRAD}, format='json',
-        )
-        force_authenticate(request, user=admin)
-        resp = AdminSimulationsView.as_view()(request)
-        self.assertEqual(resp.status_code, 201)
-        self.assertEqual(
-            Cohort.objects.get(name='SIM-NEW').advisor_hourly_rate, DEFAULT_ADVISOR_HOURLY_RATE,
-        )
+
+        def post(body):
+            request = APIRequestFactory().post('/api/admin/simulations/', body, format='json')
+            force_authenticate(request, user=admin)
+            return AdminSimulationsView.as_view()(request)
+
+        base = {
+            'name': 'SIM-NEW', 'tier': Tier.UNDERGRAD, 'teams': 2, 'team_size': 4,
+            'enrollment_capacity': 30, 'days_per_round': 7, 'price_per_student': 0,
+            'timezone': 'UTC', 'start_date': '2026-09-01',
+        }
+        rejected = post(base)
+        self.assertEqual(rejected.status_code, 400)
+        self.assertIn('advisor_hourly_rate', rejected.data['errors'])
+
+        created = post({**base, 'advisor_hourly_rate': DEFAULT_ADVISOR_HOURLY_RATE})
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(Cohort.objects.get(name='SIM-NEW').advisor_hourly_rate, 300)
 
     def test_a_four_advisor_room_hour_bills_four_times_the_rate(self):
         cohort = Cohort.objects.create(name='SIM-ROOM4', tier=Tier.UNDERGRAD)
@@ -358,3 +375,83 @@ class AdvisorRateDefaultTests(TestCase):
         )
         billed = GroupConversationView._meter_group_session(student, run, room)
         self.assertEqual(billed.billed, 1200)
+
+
+class AdminCreateSimulationValidationTests(TestCase):
+    """Creating a simulation used to accept almost anything: a blank tier became
+    UNDERGRAD, a cleared team count became 0 firms, an unparseable date became
+    None, and out-of-range numbers were silently clamped. Every one of those
+    produced a simulation that quietly wasn't what the admin typed.
+    """
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username='root@example.com', password='pw', role=UserRole.INSTRUCTOR,
+            is_staff=True, is_superuser=True,
+        )
+
+    def _post(self, body):
+        request = APIRequestFactory().post('/api/admin/simulations/', body, format='json')
+        force_authenticate(request, user=self.admin)
+        return AdminSimulationsView.as_view()(request)
+
+    def _valid(self, **overrides):
+        body = {
+            'name': 'SIM-VALID', 'tier': Tier.GRADUATE, 'teams': 3,
+            'team_size': 4, 'enrollment_capacity': 30, 'days_per_round': 7,
+            'price_per_student': 100, 'advisor_hourly_rate': 300,
+            'timezone': 'UTC', 'start_date': '2026-09-01',
+        }
+        body.update(overrides)
+        return body
+
+    def test_a_complete_payload_creates_the_simulation(self):
+        resp = self._post(self._valid())
+        self.assertEqual(resp.status_code, 201)
+        cohort = Cohort.objects.get(name='SIM-VALID')
+        self.assertEqual(cohort.tier, Tier.GRADUATE)
+        self.assertEqual(cohort.advisor_hourly_rate, 300)
+        self.assertEqual(Team.objects.filter(cohort=cohort).count(), 3)
+
+    def test_an_empty_payload_reports_every_missing_field(self):
+        resp = self._post({})
+        self.assertEqual(resp.status_code, 400)
+        errors = resp.data['errors']
+        for field in ('name', 'tier', 'teams', 'team_size', 'enrollment_capacity',
+                      'days_per_round', 'price_per_student', 'advisor_hourly_rate',
+                      'timezone', 'start_date'):
+            self.assertIn(field, errors, f'{field} was accepted while missing')
+        self.assertFalse(Cohort.objects.exists())
+
+    def test_blank_and_malformed_values_are_rejected_not_defaulted(self):
+        cases = [
+            ({'name': '   '}, 'name'),
+            ({'tier': 'POSTGRAD'}, 'tier'),
+            ({'teams': ''}, 'teams'),
+            ({'teams': 'four'}, 'teams'),
+            ({'teams': 0}, 'teams'),
+            ({'teams': 99}, 'teams'),
+            ({'team_size': 0}, 'team_size'),
+            ({'days_per_round': 0}, 'days_per_round'),
+            ({'advisor_hourly_rate': -1}, 'advisor_hourly_rate'),
+            ({'start_date': ''}, 'start_date'),
+            ({'start_date': 'next tuesday'}, 'start_date'),
+            ({'timezone': ''}, 'timezone'),
+        ]
+        for override, field in cases:
+            resp = self._post(self._valid(**override))
+            self.assertEqual(resp.status_code, 400, f'{override} was accepted')
+            self.assertIn(field, resp.data['errors'], f'{override} did not flag {field}')
+        self.assertFalse(Cohort.objects.exists())
+
+    def test_capacity_must_hold_the_firms_it_is_given(self):
+        resp = self._post(self._valid(teams=10, team_size=5, enrollment_capacity=20))
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('enrollment_capacity', resp.data['errors'])
+
+    def test_duplicate_names_are_rejected(self):
+        self.assertEqual(self._post(self._valid()).status_code, 201)
+        resp = self._post(self._valid(name='sim-valid'))
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('name', resp.data['errors'])
+        self.assertEqual(Cohort.objects.count(), 1)

@@ -1,7 +1,7 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from . import views
+from . import invite_api, views
 from . import instructor_api
 from . import student_api
 app_name = 'api'
@@ -33,6 +33,16 @@ urlpatterns = [
 
     # Help window's ASK box -> the starved help channel (help/prompts.py).
     path('help/ask/', views.HelpAskView.as_view(), name='help_ask'),
+
+    # Redeeming a student invitation. Unauthenticated — the token is the
+    # credential and the student has no account yet.
+    path('invites/<str:token>/', invite_api.InviteDetailView.as_view(), name='invite_detail'),
+    path('invites/<str:token>/accept/', invite_api.InviteAcceptView.as_view(), name='invite_accept'),
+
+    # The cohort-wide shared link the instructor console hands out. The console
+    # has always generated /register/<token>; nothing served it until now.
+    path('register/<str:token>/', invite_api.RegistrationDetailView.as_view(), name='registration_detail'),
+    path('register/<str:token>/accept/', invite_api.RegistrationAcceptView.as_view(), name='registration_accept'),
     path('advisors/group/start/', views.GroupStartView.as_view(), name='advisor_group_start'),
     path('advisors/<int:advisor_id>/', views.AdvisorConversationView.as_view(), name='advisor'),
     path('advisors/<int:advisor_id>/image/', views.AdvisorImageView.as_view(), name='advisor_image'),
@@ -51,6 +61,7 @@ urlpatterns = [
     path('instructor/simulations/<int:cohort_id>/advance-round/', instructor_api.InstructorAdvanceRoundView.as_view(), name='instructor_advance_round'),
     path('instructor/simulations/<int:cohort_id>/invite/', instructor_api.InstructorInviteView.as_view(), name='instructor_invite'),
     path('instructor/simulations/<int:cohort_id>/invitations/', instructor_api.InstructorInvitationsView.as_view(), name='instructor_invitations'),
+    path('instructor/simulations/<int:cohort_id>/invitations/<uuid:invitation_id>/resend/', instructor_api.InstructorInviteResendView.as_view(), name='instructor_invite_resend'),
     path('instructor/simulations/<int:cohort_id>/bulk-invite/', instructor_api.InstructorBulkInviteView.as_view(), name='instructor_bulk_invite'),
     path('instructor/simulations/<int:cohort_id>/bulk-invite-template/', instructor_api.InstructorBulkInviteTemplateView.as_view(), name='instructor_bulk_invite_template'),
     path('instructor/simulations/<int:cohort_id>/registration-link/', instructor_api.InstructorRegistrationLinkView.as_view(), name='instructor_registration_link'),

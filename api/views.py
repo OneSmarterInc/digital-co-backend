@@ -690,39 +690,80 @@ class AdminSimulationsView(APIView):
         })
 
     def post(self, request):
+        # Every field is validated and reported per-field. This used to accept
+        # almost anything: a blank tier silently became UNDERGRAD, a cleared
+        # team count became 0 (a simulation with no firms), an unparseable date
+        # became None, and out-of-range numbers were silently clamped. An admin
+        # got a created simulation that quietly wasn't what they typed.
+        errors = {}
+
         name = (request.data.get('name') or '').strip()
         if not name:
-            return Response({'detail': 'A simulation name is required.'}, status=400)
+            errors['name'] = 'Give the simulation a name.'
+        elif len(name) > 255:
+            errors['name'] = 'Keep the name under 255 characters.'
+        elif Cohort.objects.filter(name__iexact=name).exists():
+            errors['name'] = 'A simulation with that name already exists.'
+
         tier = request.data.get('tier')
         if tier not in (Tier.UNDERGRAD, Tier.GRADUATE):
-            tier = Tier.UNDERGRAD
-        try:
-            team_count = int(request.data.get('teams') or 0)
-        except (TypeError, ValueError):
-            team_count = 0
-        timezone = (request.data.get('timezone') or 'UTC').strip() or 'UTC'
-        start_date = parse_date(request.data.get('start_date') or '')
+            errors['tier'] = 'Choose Undergraduate or Graduate.'
 
-        def clamped_int(key, default, lo, hi, alias=None):
+        def required_int(key, label, lo, hi, alias=None):
+            """A number the admin must supply, inside its range — never clamped
+            or defaulted silently, because both hide a typo.
+
+            Errors are keyed by the name the caller actually used, so the form
+            can attach the message to the field the admin is looking at. The
+            frontend says "days_per_round" where the model says "days_per_week";
+            reporting under the model's name left that error orphaned."""
+            supplied = key if key in request.data else (
+                alias if alias and alias in request.data else (alias or key)
+            )
             raw = request.data.get(key, request.data.get(alias) if alias else None)
             if raw in (None, ''):
-                return default
+                errors[supplied] = f'{label} is required.'
+                return None
             try:
                 value = int(raw)
             except (TypeError, ValueError):
-                return default
-            return max(lo, min(value, hi))
+                errors[supplied] = f'{label} must be a whole number.'
+                return None
+            if not lo <= value <= hi:
+                errors[supplied] = f'{label} must be between {lo} and {hi}.'
+                return None
+            return value
 
-        # Provisioning the instructor console reads everywhere; the frontend says
-        # "rounds" so days_per_round is accepted as an alias for days_per_week.
-        days_per_week = clamped_int('days_per_week', 7, 1, 60, alias='days_per_round')
-        team_size = clamped_int('team_size', 4, 1, 12)
-        enrollment_capacity = clamped_int('enrollment_capacity', 30, 1, 1000)
-        price_per_student = clamped_int('price_per_student', 0, 0, 100000)
-        # Defaults to the real rate, not 0 — see Cohort.advisor_hourly_rate.
-        advisor_hourly_rate = clamped_int(
-            'advisor_hourly_rate', DEFAULT_ADVISOR_HOURLY_RATE, 0, 100000,
-        )
+        team_count = required_int('teams', 'Number of firms', 1, 20)
+        # The frontend says "rounds", so days_per_round is accepted as an alias.
+        days_per_week = required_int('days_per_week', 'Round length', 1, 60, alias='days_per_round')
+        team_size = required_int('team_size', 'Firm size', 1, 12)
+        enrollment_capacity = required_int('enrollment_capacity', 'Enrollment capacity', 1, 1000)
+        price_per_student = required_int('price_per_student', 'Price per student', 0, 100000)
+        advisor_hourly_rate = required_int('advisor_hourly_rate', 'Advisor rate', 0, 100000)
+
+        if team_count and team_size and enrollment_capacity:
+            if team_count * team_size > enrollment_capacity:
+                errors['enrollment_capacity'] = (
+                    f'{team_count} firms of {team_size} needs at least '
+                    f'{team_count * team_size} seats.'
+                )
+
+        timezone = (request.data.get('timezone') or '').strip()
+        if not timezone:
+            errors['timezone'] = 'Choose a time zone.'
+
+        raw_start = (request.data.get('start_date') or '').strip()
+        start_date = parse_date(raw_start) if raw_start else None
+        if not raw_start:
+            errors['start_date'] = 'Set a start date — the round calendar is built from it.'
+        elif start_date is None:
+            errors['start_date'] = 'That start date is not a valid date.'
+
+        if errors:
+            return Response(
+                {'detail': 'Some fields need attention.', 'errors': errors}, status=400,
+            )
 
         cohort = Cohort.objects.create(
             name=name,
@@ -755,7 +796,7 @@ class AdminSimulationsView(APIView):
             if instructors:
                 cohort.instructors.add(*instructors)
 
-        for index in range(max(0, min(team_count, 20))):
+        for index in range(team_count):
             team = Team.objects.create(cohort=cohort, name=f'Team {index + 1}')
             Run.objects.create(team=team)
         return Response(_simulation_row(cohort), status=201)
