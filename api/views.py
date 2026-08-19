@@ -6,6 +6,7 @@ builders), so the API and the current web UI share one source of truth. Auth is
 JWT: clients obtain a token at /api/token/ and send it as a Bearer header.
 """
 import json as _json
+import secrets
 import os as _os
 import urllib.error
 import urllib.request
@@ -807,17 +808,6 @@ class AdminSimulationsView(APIView):
         return Response(_simulation_row(cohort), status=201)
 
 
-class AdminSimulationDetailView(APIView):
-    """Delete a simulation (its cohort, teams, and runs cascade)."""
-
-    permission_classes = [IsAuthenticated, IsAdmin]
-
-    def delete(self, request, cohort_id):
-        cohort = get_object_or_404(Cohort, id=cohort_id)
-        cohort.delete()
-        return Response(status=204)
-
-
 class AdminSimulationTeamsView(APIView):
     """Add one team (with its run) to a simulation."""
 
@@ -830,6 +820,57 @@ class AdminSimulationTeamsView(APIView):
         Run.objects.create(team=team)
         return Response(_simulation_row(cohort), status=201)
     
+class AdminFacultyView(APIView):
+    """Create an instructor account.
+
+    The admin console could list faculty but not add any, so provisioning a
+    cohort for a new lecturer meant a shell command first. Same one-time
+    temporary-password pattern the student reset already uses: generated
+    server-side, shown once, never retrievable again.
+    """
+
+    permission_classes = [IsAuthenticated, IsAdmin]
+
+    # Unambiguous alphabet — these get read aloud or typed from a note.
+    ALPHABET = 'abcdefghjkmnpqrstuvwxyzACDEFGHJKLMNPQRSTUVWXYZ2345679'
+
+    def post(self, request):
+        errors = {}
+        email = (request.data.get('email') or '').strip().lower()
+        first_name = (request.data.get('first_name') or '').strip()
+        last_name = (request.data.get('last_name') or '').strip()
+
+        if not email or '@' not in email:
+            errors['email'] = 'Enter a valid email address.'
+        elif User.objects.filter(username__iexact=email).exists():
+            existing = User.objects.get(username__iexact=email)
+            if existing.role == UserRole.INSTRUCTOR:
+                errors['email'] = 'That instructor already exists — pick them from the list.'
+            else:
+                errors['email'] = 'That email already belongs to an account on this workspace.'
+        if not first_name:
+            errors['first_name'] = 'Give the instructor a first name.'
+
+        if errors:
+            return Response(
+                {'detail': 'Some fields need attention.', 'errors': errors}, status=400,
+            )
+
+        temp_password = ''.join(secrets.choice(self.ALPHABET) for _ in range(16))
+        user = User.objects.create_user(
+            username=email, email=email, password=temp_password,
+            first_name=first_name, last_name=last_name, role=UserRole.INSTRUCTOR,
+        )
+        return Response({
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'name': (user.get_full_name() or user.username),
+            # Shown once. There is no way to read it back.
+            'temp_password': temp_password,
+        }, status=201)
+
+
 class AdminPeopleView(APIView):
     """Admins, faculty, and students for the workspace views."""
 

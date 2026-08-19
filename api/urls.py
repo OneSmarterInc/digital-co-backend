@@ -48,6 +48,7 @@ urlpatterns = [
     path('advisors/<int:advisor_id>/image/', views.AdvisorImageView.as_view(), name='advisor_image'),
     path('advisors/<int:advisor_id>/speak/', views.AdvisorSpeakView.as_view(), name='advisor_speak'),
     path('admin/people/', views.AdminPeopleView.as_view(), name='admin_people'),
+    path('admin/faculty/', views.AdminFacultyView.as_view(), name='admin_faculty'),
     # Instructor
     path('instructor/queue/', views.InstructorQueueView.as_view(), name='instructor_queue'),
     path('instructor/score/<int:score_id>/', views.InstructorScoreView.as_view(), name='instructor_score'),

@@ -31,7 +31,7 @@ from .instructor_api import (
     InstructorSimulationDetailView, _advisor_usage_by_student, _billing,
 )
 from .views import (
-    AdminSimulationsView, GroupConversationView, InstructorQueueView,
+    AdminFacultyView, AdminSimulationsView, GroupConversationView, InstructorQueueView,
     InstructorScoreView, RunView, resolve_run, run_for_user,
 )
 
@@ -659,3 +659,68 @@ class ImpossibleDateOnCreateTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn('start_date', resp.data['errors'])
         self.assertFalse(Cohort.objects.filter(name='SIM-BADDATE').exists())
+
+
+class AdminCreateFacultyTests(TestCase):
+    """The admin console could list faculty but never create one, so a cohort
+    could only be handed to someone who already had an account."""
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username='super@example.com', password='pw', role=UserRole.INSTRUCTOR,
+            is_staff=True, is_superuser=True,
+        )
+
+    def _post(self, body, user=None):
+        request = APIRequestFactory().post('/api/admin/faculty/', body, format='json')
+        force_authenticate(request, user=user or self.admin)
+        return AdminFacultyView.as_view()(request)
+
+    def test_creating_faculty_returns_a_one_time_password(self):
+        resp = self._post({'email': 'New.Prof@Example.com', 'first_name': 'Ada', 'last_name': 'Byron'})
+        self.assertEqual(resp.status_code, 201)
+
+        user = User.objects.get(username='new.prof@example.com')
+        self.assertEqual(user.role, UserRole.INSTRUCTOR)
+        self.assertEqual(user.first_name, 'Ada')
+        self.assertEqual(resp.data['name'], 'Ada Byron')
+
+        temp = resp.data['temp_password']
+        self.assertEqual(len(temp), 16)
+        # It is a real credential, not a placeholder.
+        self.assertTrue(user.check_password(temp))
+        # And it is not recoverable — nothing stores it in the clear.
+        self.assertNotIn(temp, user.password)
+
+    def test_the_new_instructor_can_be_assigned_to_a_cohort(self):
+        created = self._post({'email': 'teach@example.com', 'first_name': 'Grace'})
+        cohort = Cohort.objects.create(name='SIM-NEWFAC', tier=Tier.UNDERGRAD)
+        cohort.instructors.add(User.objects.get(id=created.data['id']))
+        self.assertEqual([i.username for i in cohort.instructors.all()], ['teach@example.com'])
+
+    def test_duplicates_and_bad_input_are_reported_per_field(self):
+        self._post({'email': 'dup@example.com', 'first_name': 'A'})
+        cases = [
+            ({'email': 'dup@example.com', 'first_name': 'A'}, 'email'),
+            ({'email': 'DUP@example.com', 'first_name': 'A'}, 'email'),
+            ({'email': 'not-an-email', 'first_name': 'A'}, 'email'),
+            ({'email': '', 'first_name': 'A'}, 'email'),
+            ({'email': 'ok@example.com', 'first_name': ''}, 'first_name'),
+        ]
+        for body, field in cases:
+            resp = self._post(body)
+            self.assertEqual(resp.status_code, 400, body)
+            self.assertIn(field, resp.data['errors'], body)
+        self.assertEqual(User.objects.filter(role=UserRole.INSTRUCTOR).count(), 2)  # admin + dup
+
+    def test_an_email_belonging_to_a_student_is_refused(self):
+        User.objects.create_user(username='stud@example.com', password='pw', role=UserRole.STUDENT)
+        resp = self._post({'email': 'stud@example.com', 'first_name': 'A'})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('already belongs', resp.data['errors']['email'])
+
+    def test_a_plain_instructor_cannot_create_faculty(self):
+        plain = User.objects.create_user(
+            username='plain@example.com', password='pw', role=UserRole.INSTRUCTOR,
+        )
+        self.assertEqual(self._post({'email': 'x@example.com', 'first_name': 'A'}, user=plain).status_code, 403)
