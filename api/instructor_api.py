@@ -30,6 +30,7 @@ from mailer.invites import send_invitation
 from core.models import (
     Cohort, Enrollment, Invitation, InvitationStatus, Run, RunStatus, Team, User, UserRole,
 )
+from weeks.models import WeekInstanceStatus
 
 from .permissions import IsInstructor
 from .views import ADMIN_TOTAL_ROUNDS, _instructor_cohort_row
@@ -546,6 +547,105 @@ class InstructorMoveEnrollmentView(APIView):
             enrollment.team = team
             enrollment.save(update_fields=['team'])
         return Response({'ok': True, 'firm': team.name})
+
+
+# ---- firms: create, delete ------------------------------------------------
+
+MAX_FIRMS = 20
+
+
+class InstructorFirmsView(APIView):
+    """Add a firm to a cohort.
+
+    Firms could only be created at provisioning, by an admin. A term does not
+    hold still — students arrive late, a firm of five is better split than
+    stretched — so faculty create them here, with the run the engine needs
+    attached at the same moment.
+    """
+
+    permission_classes = [IsAuthenticated, IsInstructor]
+
+    def post(self, request, cohort_id):
+        cohort = _cohort_for(request, cohort_id)
+        existing = Team.objects.filter(cohort=cohort)
+        if existing.count() >= MAX_FIRMS:
+            return Response(
+                {'detail': f'A cohort holds at most {MAX_FIRMS} firms.'}, status=400,
+            )
+
+        name = (request.data.get('name') or '').strip()
+        if not name:
+            # Next free "Team N" — counting is not enough, because deleting
+            # Team 2 of three would otherwise propose a name already in use.
+            taken = set(existing.values_list('name', flat=True))
+            n = 1
+            while f'Team {n}' in taken:
+                n += 1
+            name = f'Team {n}'
+        elif len(name) > 255:
+            return Response({'detail': 'Keep the firm name under 255 characters.'}, status=400)
+        elif existing.filter(name__iexact=name).exists():
+            return Response(
+                {'detail': f'This cohort already has a firm called {name}.'}, status=400,
+            )
+
+        with transaction.atomic():
+            team = Team.objects.create(cohort=cohort, name=name)
+            Run.objects.create(team=team)
+
+        _, numbering = _firm_numbering(cohort)
+        return Response(
+            {'id': team.id, 'name': team.name, 'number': numbering.get(team.id)}, status=201,
+        )
+
+
+class InstructorFirmDetailView(APIView):
+    """Delete a firm.
+
+    Deliberately obstructive. Run is a OneToOne on Team with CASCADE, so
+    deleting a firm takes its run, its week instances, its submissions and its
+    score records with it — a term's graded work, gone on one click and not
+    recoverable from the UI. So a firm is only deletable while it is genuinely
+    empty: nobody in it, and nothing ever submitted.
+    """
+
+    permission_classes = [IsAuthenticated, IsInstructor]
+
+    def delete(self, request, cohort_id, firm_number):
+        cohort = _cohort_for(request, cohort_id)
+        _, numbering = _firm_numbering(cohort)
+        team_id = next((tid for tid, num in numbering.items() if num == firm_number), None)
+        if team_id is None:
+            return Response({'detail': 'No such firm in this cohort.'}, status=404)
+        team = Team.objects.get(id=team_id)
+
+        members = team.members.count()
+        if members:
+            return Response({
+                'detail': (
+                    f'{team.name} still has {members} student'
+                    f'{"" if members == 1 else "s"} in it. Move them out first — '
+                    'deleting a firm would delete their work with it.'
+                ),
+            }, status=409)
+
+        run = Run.objects.filter(team=team).first()
+        if run:
+            worked = run.week_instances.filter(
+                status__in=(WeekInstanceStatus.SUBMITTED, WeekInstanceStatus.SCORED)
+            ).count()
+            if worked:
+                return Response({
+                    'detail': (
+                        f'{team.name} has {worked} submitted round'
+                        f'{"" if worked == 1 else "s"} on record. That work cannot be '
+                        'recovered once the firm is deleted, so this is blocked.'
+                    ),
+                }, status=409)
+
+        name = team.name
+        team.delete()  # takes the empty run with it
+        return Response({'ok': True, 'deleted': name})
 
 
 # ---- setup test team ------------------------------------------------------

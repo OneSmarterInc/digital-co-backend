@@ -195,17 +195,27 @@ class InviteRedemptionTests(MailerTestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn('password_confirm', resp.data['errors'])
 
-    def test_without_a_preassigned_firm_the_smallest_one_is_used(self):
-        crowded = self.team
-        crowded.members.add(User.objects.create_user(username='a@x.com', password='pw'))
-        empty = Team.objects.create(cohort=self.cohort, name='Team 2')
-
+    def test_without_a_preassigned_firm_the_student_stays_unallocated(self):
+        """Firm allocation is the instructor's call. Accepting an invite must
+        not quietly place a student — they wait, with only the tour to look at,
+        until an instructor allocates them."""
+        Team.objects.create(cohort=self.cohort, name='Team 2')
         invitation = self._invitation(team=None)
         self._accept(invitation.token)
 
         user = User.objects.get(username='student@example.com')
-        self.assertIn(user, empty.members.all())
-        self.assertNotIn(user, crowded.members.all())
+        enrollment = Enrollment.objects.get(cohort=self.cohort, student=user)
+        self.assertIsNone(enrollment.team)
+        for team in Team.objects.filter(cohort=self.cohort):
+            self.assertNotIn(user, team.members.all())
+
+    def test_a_preassigned_firm_on_the_invitation_is_honoured(self):
+        invitation = self._invitation(team=self.team)
+        self._accept(invitation.token)
+
+        user = User.objects.get(username='student@example.com')
+        self.assertEqual(Enrollment.objects.get(cohort=self.cohort, student=user).team, self.team)
+        self.assertIn(user, self.team.members.all())
 
 
 class MailjetConfigTests(TestCase):
@@ -258,13 +268,15 @@ class SelfRegistrationTests(MailerTestCase):
         self.assertEqual(self._detail('nope').status_code, 404)
         self.assertEqual(self._join('nope').status_code, 404)
 
-    def test_joining_creates_the_account_and_seats_the_firm(self):
+    def test_joining_creates_the_account_and_leaves_the_student_unallocated(self):
         resp = self._join()
         self.assertEqual(resp.status_code, 201)
         user = User.objects.get(username='joiner@example.com')
         self.assertEqual(user.first_name, 'Alan')
-        self.assertTrue(Enrollment.objects.filter(cohort=self.cohort, student=user).exists())
-        self.assertIn(user, self.team.members.all())
+        enrollment = Enrollment.objects.get(cohort=self.cohort, student=user)
+        self.assertIsNone(enrollment.team)
+        self.assertIsNone(resp.data['firm'])
+        self.assertNotIn(user, self.team.members.all())
 
     def test_the_link_is_reusable_unlike_an_invitation(self):
         self.assertEqual(self._join(email='one@example.com').status_code, 201)

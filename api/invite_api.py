@@ -16,7 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.models import (
-    Cohort, Enrollment, Invitation, InvitationStatus, Team, User, UserRole,
+    Cohort, Enrollment, Invitation, InvitationStatus, User, UserRole,
 )
 
 MIN_PASSWORD_LENGTH = 8
@@ -120,17 +120,12 @@ class InviteAcceptView(APIView):
                 user.last_name = last_name
             user.save(update_fields=['first_name', 'last_name'])
 
+            # Only a firm the instructor pre-assigned on the invitation. A
+            # student who arrives without one stays UNALLOCATED: which firm a
+            # student belongs to is a teaching decision, and auto-filling the
+            # emptiest one quietly made it for them. Until an instructor
+            # allocates, the student can watch the tour and nothing else.
             team = locked.team
-            if team is None:
-                # No pre-assigned firm: put them in the smallest one that has
-                # room, so a cohort fills evenly instead of stacking Team 1.
-                candidates = sorted(
-                    Team.objects.filter(cohort=cohort),
-                    key=lambda t: t.members.count(),
-                )
-                capacity = cohort.team_size or 4
-                team = next((t for t in candidates if t.members.count() < capacity), None)
-                team = team or (candidates[0] if candidates else None)
             if team is not None:
                 team.members.add(user)
 
@@ -174,13 +169,14 @@ def _open_cohort(token):
 
 
 def _seat_student(cohort, user, preferred_team=None):
-    """Enroll a student and put them in the emptiest firm with room."""
+    """Enroll a student, leaving them unallocated unless a firm was named.
+
+    Firm allocation is the instructor's call — they balance firms, separate
+    people who shouldn't work together, and sometimes wait for the roster to
+    settle. Auto-filling the emptiest firm took that decision away and did it
+    silently, at the moment of registration.
+    """
     team = preferred_team
-    if team is None:
-        candidates = sorted(Team.objects.filter(cohort=cohort), key=lambda t: t.members.count())
-        capacity = cohort.team_size or 4
-        team = next((t for t in candidates if t.members.count() < capacity), None)
-        team = team or (candidates[0] if candidates else None)
     if team is not None:
         team.members.add(user)
     enrollment, _ = Enrollment.objects.get_or_create(

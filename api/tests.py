@@ -25,6 +25,7 @@ from scoring.models import ScoreRecord
 from weeks.models import Submission, WeekInstance, WeekInstanceStatus
 
 from .instructor_api import (
+    InstructorFirmDetailView, InstructorFirmsView, InstructorMoveEnrollmentView,
     InstructorSimulationDetailView, _advisor_usage_by_student, _billing,
 )
 from .views import (
@@ -455,3 +456,113 @@ class AdminCreateSimulationValidationTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn('name', resp.data['errors'])
         self.assertEqual(Cohort.objects.count(), 1)
+
+
+class InstructorFirmManagementTests(TestCase):
+    """Faculty create and delete firms, and allocate students into them.
+
+    Deletion is the dangerous one: Run is a OneToOne on Team with CASCADE, so a
+    firm carries its run, week instances, submissions and score records down
+    with it. These tests pin the guards that stop that happening by accident.
+    """
+
+    def setUp(self):
+        self.instructor = User.objects.create_user(
+            username='firms@example.com', password='pw', role=UserRole.INSTRUCTOR,
+        )
+        self.cohort = Cohort.objects.create(name='SIM-FIRMS', tier=Tier.UNDERGRAD)
+        self.cohort.instructors.add(self.instructor)
+        self.other = User.objects.create_user(
+            username='notmine@example.com', password='pw', role=UserRole.INSTRUCTOR,
+        )
+
+    def _create(self, body=None, user=None):
+        request = APIRequestFactory().post('/x', body or {}, format='json')
+        force_authenticate(request, user=user or self.instructor)
+        return InstructorFirmsView.as_view()(request, cohort_id=self.cohort.id)
+
+    def _delete(self, firm_number, user=None):
+        request = APIRequestFactory().delete('/x')
+        force_authenticate(request, user=user or self.instructor)
+        return InstructorFirmDetailView.as_view()(
+            request, cohort_id=self.cohort.id, firm_number=firm_number,
+        )
+
+    def test_creating_a_firm_also_creates_its_run(self):
+        resp = self._create()
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data['name'], 'Team 1')
+        team = Team.objects.get(cohort=self.cohort, name='Team 1')
+        self.assertTrue(Run.objects.filter(team=team).exists())
+
+    def test_default_names_skip_over_names_already_taken(self):
+        self._create()                      # Team 1
+        self._create()                      # Team 2
+        self._delete(1)                     # remove Team 1, leaving Team 2
+        resp = self._create()
+        # Counting would have proposed "Team 2", which already exists.
+        self.assertEqual(resp.data['name'], 'Team 1')
+
+    def test_a_named_firm_is_accepted_and_duplicates_are_not(self):
+        self.assertEqual(self._create({'name': 'Northwind'}).status_code, 201)
+        clash = self._create({'name': 'northwind'})
+        self.assertEqual(clash.status_code, 400)
+        self.assertEqual(Team.objects.filter(cohort=self.cohort).count(), 1)
+
+    def test_an_empty_firm_can_be_deleted(self):
+        self._create()
+        resp = self._delete(1)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(Team.objects.filter(cohort=self.cohort).count(), 0)
+        self.assertEqual(Run.objects.filter(team__cohort=self.cohort).count(), 0)
+
+    def test_a_firm_with_students_in_it_cannot_be_deleted(self):
+        self._create()
+        team = Team.objects.get(cohort=self.cohort)
+        student = User.objects.create_user(username='s@example.com', password='pw', role=UserRole.STUDENT)
+        team.members.add(student)
+
+        resp = self._delete(1)
+        self.assertEqual(resp.status_code, 409)
+        self.assertIn('Move them out first', resp.data['detail'])
+        self.assertTrue(Team.objects.filter(cohort=self.cohort).exists())
+
+    def test_a_firm_with_submitted_work_cannot_be_deleted(self):
+        self._create()
+        team = Team.objects.get(cohort=self.cohort)
+        run = Run.objects.get(team=team)
+        WeekInstance.objects.create(run=run, week_number=1, status=WeekInstanceStatus.SUBMITTED)
+
+        resp = self._delete(1)
+        self.assertEqual(resp.status_code, 409)
+        self.assertIn('cannot be recovered', resp.data['detail'])
+        self.assertTrue(Run.objects.filter(team=team).exists())
+
+    def test_another_instructors_cohort_is_untouchable(self):
+        self.assertEqual(self._create(user=self.other).status_code, 404)
+        self._create()
+        self.assertEqual(self._delete(1, user=self.other).status_code, 404)
+        self.assertTrue(Team.objects.filter(cohort=self.cohort).exists())
+
+    def test_allocating_and_unallocating_a_student(self):
+        self._create()
+        team = Team.objects.get(cohort=self.cohort)
+        student = User.objects.create_user(username='alloc@example.com', password='pw', role=UserRole.STUDENT)
+        enrollment = Enrollment.objects.create(cohort=self.cohort, student=student)
+
+        def move(firm_number):
+            request = APIRequestFactory().post('/x', {'firm_number': firm_number}, format='json')
+            force_authenticate(request, user=self.instructor)
+            return InstructorMoveEnrollmentView.as_view()(
+                request, cohort_id=self.cohort.id, enrollment_id=enrollment.id,
+            )
+
+        self.assertEqual(move(1).status_code, 200)
+        enrollment.refresh_from_db()
+        self.assertEqual(enrollment.team, team)
+        self.assertIn(student, team.members.all())
+
+        self.assertEqual(move(0).status_code, 200)   # back to unallocated
+        enrollment.refresh_from_db()
+        self.assertIsNone(enrollment.team)
+        self.assertNotIn(student, team.members.all())
