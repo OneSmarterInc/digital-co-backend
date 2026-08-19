@@ -21,6 +21,7 @@ from django.shortcuts import get_object_or_404
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone as dj_timezone
+from django.utils.dateparse import parse_date
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -187,31 +188,77 @@ class InstructorSimulationDetailView(APIView):
     permission_classes = [IsAuthenticated, IsInstructor]
 
     def patch(self, request, cohort_id):
-        """Re-price advisor time. Rates were previously set once at provisioning
-        and stuck there, which left faculty unable to correct a wrong number or
-        switch advisor time on partway through a term.
+        """Settings faculty can change mid-run: the advisor rate and the start date.
 
-        Hours already billed keep the rate snapshotted on their AdvisorSession,
-        so this changes what the *next* hour costs and never rewrites history.
+        Both were set once at provisioning and stuck there, which left faculty
+        unable to correct a wrong figure or a term that slipped a week.
+
+        advisor_hourly_rate — hours already billed keep the rate snapshotted on
+        their AdvisorSession, so this prices the *next* hour and never rewrites
+        history.
+
+        start_date — the round calendar is derived from it on every read (see
+        _rounds), never stored, so moving the date regenerates the whole schedule
+        by itself. Extensions already granted are keyed by round number and
+        survive the move, shifting along with the rounds they belong to.
         """
         cohort = _cohort_for(request, cohort_id)
-        if 'advisor_hourly_rate' not in request.data:
-            return Response({'detail': 'Nothing to update.'}, status=400)
-        raw = request.data.get('advisor_hourly_rate')
-        try:
-            rate = int(raw)
-        except (TypeError, ValueError):
-            return Response({'detail': 'The advisor rate must be a whole number.'}, status=400)
-        if not 0 <= rate <= 100000:
-            return Response({'detail': 'The advisor rate must be between 0 and 100000.'}, status=400)
 
-        previous = cohort.advisor_hourly_rate or 0
-        cohort.advisor_hourly_rate = rate
-        cohort.save(update_fields=['advisor_hourly_rate'])
+        fields = ('advisor_hourly_rate', 'start_date')
+        if not any(f in request.data for f in fields):
+            return Response({'detail': 'Nothing to update.'}, status=400)
+
+        errors = {}
+        changed = []
+        previous_rate = cohort.advisor_hourly_rate or 0
+        previous_start = cohort.start_date
+
+        if 'advisor_hourly_rate' in request.data:
+            try:
+                rate = int(request.data.get('advisor_hourly_rate'))
+            except (TypeError, ValueError):
+                errors['advisor_hourly_rate'] = 'The advisor rate must be a whole number.'
+            else:
+                if not 0 <= rate <= 100000:
+                    errors['advisor_hourly_rate'] = 'The advisor rate must be between 0 and 100000.'
+                else:
+                    cohort.advisor_hourly_rate = rate
+                    changed.append('advisor_hourly_rate')
+
+        if 'start_date' in request.data:
+            raw = (request.data.get('start_date') or '').strip()
+            if not raw:
+                errors['start_date'] = 'Set a start date — the round calendar is built from it.'
+            else:
+                # parse_date returns None for a malformed string but *raises*
+                # for a well-formed impossible one ("2026-13-45").
+                try:
+                    parsed = parse_date(raw)
+                except ValueError:
+                    parsed = None
+                if parsed is None:
+                    errors['start_date'] = 'That start date is not a valid date.'
+                else:
+                    cohort.start_date = parsed
+                    changed.append('start_date')
+
+        if errors:
+            return Response(
+                {'detail': 'Some fields need attention.', 'errors': errors}, status=400,
+            )
+
+        cohort.save(update_fields=changed)
+
+        runs = Run.objects.filter(team__cohort=cohort)
+        current_round = max((r.current_week for r in runs), default=1) or 1
         enrollments = list(Enrollment.objects.filter(cohort=cohort))
         return Response({
-            'advisor_hourly_rate': rate,
-            'previous_advisor_hourly_rate': previous,
+            'advisor_hourly_rate': cohort.advisor_hourly_rate,
+            'previous_advisor_hourly_rate': previous_rate,
+            'start_date': cohort.start_date.isoformat() if cohort.start_date else None,
+            'previous_start_date': previous_start.isoformat() if previous_start else None,
+            # The regenerated calendar, so the caller can render it without a refetch.
+            'rounds': _rounds(cohort, current_round),
             'billing': _billing(cohort, enrollments),
         })
 

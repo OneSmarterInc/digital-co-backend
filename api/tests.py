@@ -6,6 +6,8 @@ run resolution must be scoped to the cohort the request targets, not collapse
 onto an arbitrary Run.first(). Regression guard for the bug where every student
 runtime endpoint served whichever run happened to come back first.
 """
+from datetime import date
+
 from django.test import TestCase
 from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory, force_authenticate
@@ -566,3 +568,94 @@ class InstructorFirmManagementTests(TestCase):
         enrollment.refresh_from_db()
         self.assertIsNone(enrollment.team)
         self.assertNotIn(student, team.members.all())
+
+
+class StartDateChangeTests(TestCase):
+    """Faculty move a term's start date and the whole round calendar follows.
+
+    The calendar is derived from start_date on every read rather than stored, so
+    the schedule regenerates by itself — these pin that it actually does, and
+    that extensions granted earlier survive the move.
+    """
+
+    def setUp(self):
+        self.instructor = User.objects.create_user(
+            username='sched@example.com', password='pw', role=UserRole.INSTRUCTOR,
+        )
+        self.cohort = Cohort.objects.create(
+            name='SIM-SCHED', tier=Tier.UNDERGRAD,
+            start_date=date(2026, 9, 1), days_per_week=7,
+        )
+        self.cohort.instructors.add(self.instructor)
+        team = Team.objects.create(cohort=self.cohort, name='Team 1')
+        Run.objects.create(team=team, current_week=1)
+
+    def _patch(self, body, user=None):
+        request = APIRequestFactory().patch('/x', body, format='json')
+        force_authenticate(request, user=user or self.instructor)
+        return InstructorSimulationDetailView.as_view()(request, cohort_id=self.cohort.id)
+
+    def test_moving_the_start_date_rebuilds_every_round(self):
+        before = self._patch({'start_date': '2026-09-01'}).data['rounds']
+        resp = self._patch({'start_date': '2026-09-08'})   # a week later
+
+        self.assertEqual(resp.status_code, 200)
+        self.cohort.refresh_from_db()
+        self.assertEqual(self.cohort.start_date, date(2026, 9, 8))
+        self.assertEqual(resp.data['previous_start_date'], '2026-09-01')
+
+        after = resp.data['rounds']
+        self.assertEqual(len(after), len(before))
+        # Every round moved, not just the first.
+        self.assertNotEqual(after[0]['start'], before[0]['start'])
+        self.assertNotEqual(after[-1]['end'], before[-1]['end'])
+        self.assertIn('Sep 8, 2026', after[0]['start'])
+
+    def test_extensions_survive_the_move(self):
+        self.cohort.round_extensions = {'2': 3}
+        self.cohort.save(update_fields=['round_extensions'])
+
+        rounds = self._patch({'start_date': '2026-10-01'}).data['rounds']
+        self.assertEqual(rounds[1]['extended_days'], 3)
+        # R2 is three days longer than the 7-day default, so R3 starts later.
+        self.assertEqual(rounds[1]['end'], rounds[2]['start'])
+
+    def test_a_bad_date_is_rejected_and_nothing_moves(self):
+        for bad in ('', 'next tuesday', '2026-13-45'):
+            resp = self._patch({'start_date': bad})
+            self.assertEqual(resp.status_code, 400, bad)
+            self.assertIn('start_date', resp.data['errors'])
+        self.cohort.refresh_from_db()
+        self.assertEqual(self.cohort.start_date, date(2026, 9, 1))
+
+    def test_the_rate_and_the_date_can_move_together(self):
+        resp = self._patch({'start_date': '2026-11-02', 'advisor_hourly_rate': 250})
+        self.assertEqual(resp.status_code, 200)
+        self.cohort.refresh_from_db()
+        self.assertEqual(self.cohort.start_date, date(2026, 11, 2))
+        self.assertEqual(self.cohort.advisor_hourly_rate, 250)
+
+    def test_an_empty_patch_is_refused(self):
+        self.assertEqual(self._patch({}).status_code, 400)
+
+
+class ImpossibleDateOnCreateTests(TestCase):
+    """A well-formed but impossible date used to raise out of parse_date and
+    500 the create endpoint instead of being reported as a field error."""
+
+    def test_an_impossible_date_is_a_field_error_not_a_crash(self):
+        admin = User.objects.create_user(
+            username='dates@example.com', password='pw', role=UserRole.INSTRUCTOR,
+            is_staff=True, is_superuser=True,
+        )
+        request = APIRequestFactory().post('/api/admin/simulations/', {
+            'name': 'SIM-BADDATE', 'tier': Tier.UNDERGRAD, 'teams': 2, 'team_size': 4,
+            'enrollment_capacity': 30, 'days_per_round': 7, 'price_per_student': 0,
+            'advisor_hourly_rate': 300, 'timezone': 'UTC', 'start_date': '2026-13-45',
+        }, format='json')
+        force_authenticate(request, user=admin)
+        resp = AdminSimulationsView.as_view()(request)
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('start_date', resp.data['errors'])
+        self.assertFalse(Cohort.objects.filter(name='SIM-BADDATE').exists())

@@ -754,7 +754,12 @@ class AdminSimulationsView(APIView):
             errors['timezone'] = 'Choose a time zone.'
 
         raw_start = (request.data.get('start_date') or '').strip()
-        start_date = parse_date(raw_start) if raw_start else None
+        # parse_date returns None for a malformed string but *raises* for a
+        # well-formed impossible one ("2026-13-45"), which would 500 the create.
+        try:
+            start_date = parse_date(raw_start) if raw_start else None
+        except ValueError:
+            start_date = None
         if not raw_start:
             errors['start_date'] = 'Set a start date — the round calendar is built from it.'
         elif start_date is None:
