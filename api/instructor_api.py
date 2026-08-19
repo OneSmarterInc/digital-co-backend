@@ -393,9 +393,14 @@ class InstructorBulkInviteView(APIView):
 class InstructorInviteResendView(APIView):
     """Send an outstanding invitation again.
 
-    Rotates the token, so an old forwarded link stops working — a resend is
-    usually prompted by "I never got it", and the previous link may be sitting
-    in a spam folder or someone else's inbox.
+    The token is deliberately NOT rotated. Resending exists because a student
+    says "I never got it", and rotating would kill every copy already sitting in
+    their inbox — including the one they are about to find in spam. An instructor
+    resending twice while chasing someone would leave only the newest mail
+    working, and every earlier link reading "this link is not valid".
+
+    Pass {"reissue": true} to deliberately retire the old links — for a mistyped
+    address, or an invite forwarded to the wrong person.
     """
 
     permission_classes = [IsAuthenticated, IsInstructor]
@@ -407,8 +412,9 @@ class InstructorInviteResendView(APIView):
             return Response(
                 {'detail': 'That invitation has already been accepted.'}, status=409,
             )
-        invitation.token = secrets.token_urlsafe(24)
-        invitation.save(update_fields=['token'])
+        if request.data.get('reissue'):
+            invitation.token = secrets.token_urlsafe(24)
+            invitation.save(update_fields=['token'])
         sent, detail = send_invitation(invitation)
         if not sent:
             return Response({'detail': detail, **_invite_json(invitation)}, status=502)

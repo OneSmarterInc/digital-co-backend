@@ -96,21 +96,40 @@ class InviteEndpointTests(MailerTestCase):
         self.assertEqual(len(self.outbox.outbox), 1)
         self.assertEqual(self.outbox.outbox[0].to_email, 'new@example.com')
 
-    def test_resending_rotates_the_token_so_the_old_link_dies(self):
+    def _resend(self, invitation, **body):
+        request = APIRequestFactory().post('/x', body, format='json')
+        force_authenticate(request, user=self.instructor)
+        return InstructorInviteResendView.as_view()(
+            request, cohort_id=self.cohort.id, invitation_id=invitation.id,
+        )
+
+    def test_resending_keeps_the_token_so_earlier_emails_still_work(self):
+        """The failure this guards: an instructor chasing a student resends
+        twice, and every copy already in that inbox stops working."""
+        self._post_invite('new@example.com')
+        invitation = Invitation.objects.get(email='new@example.com')
+        first_token = invitation.token
+
+        self.assertEqual(self._resend(invitation).status_code, 200)
+        self.assertEqual(self._resend(invitation).status_code, 200)
+        invitation.refresh_from_db()
+
+        self.assertEqual(invitation.token, first_token)
+        self.assertEqual(len(self.outbox.outbox), 3)
+        # Every link ever emailed for this invitation is the same one.
+        self.assertEqual(
+            {m.text.split('/invite/')[1].split()[0] for m in self.outbox.outbox},
+            {first_token},
+        )
+
+    def test_reissue_retires_the_old_links_when_asked(self):
         self._post_invite('new@example.com')
         invitation = Invitation.objects.get(email='new@example.com')
         old_token = invitation.token
 
-        request = APIRequestFactory().post('/x')
-        force_authenticate(request, user=self.instructor)
-        resp = InstructorInviteResendView.as_view()(
-            request, cohort_id=self.cohort.id, invitation_id=invitation.id,
-        )
+        self.assertEqual(self._resend(invitation, reissue=True).status_code, 200)
         invitation.refresh_from_db()
-
-        self.assertEqual(resp.status_code, 200)
         self.assertNotEqual(invitation.token, old_token)
-        self.assertEqual(len(self.outbox.outbox), 2)
 
 
 class InviteRedemptionTests(MailerTestCase):
