@@ -882,14 +882,24 @@ class AdminPeopleView(APIView):
     def get(self, request):
         admins, faculty, students, instructors = [], [], [], []
         for user in User.objects.all().order_by('username'):
-            base = {'id': user.id, 'username': user.username, 'email': user.email or ''}
+            # username is the email address here, so a person's actual name has
+            # to travel separately or every screen shows the address instead.
+            display_name = (user.get_full_name() or '').strip() or user.username
+            base = {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email or '',
+                'name': display_name,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+            }
             is_admin_account = user.is_staff or user.is_superuser
             cohorts = (
                 list(user.instructed_cohorts.values_list('name', flat=True))
                 if user.role == UserRole.INSTRUCTOR else []
             )
             if user.role == UserRole.INSTRUCTOR:
-                instructors.append({'id': user.id, 'username': user.username})
+                instructors.append({'id': user.id, 'username': user.username, 'name': display_name})
             # Each person lands in exactly one list. A teaching instructor is
             # faculty even if they're also a superuser; a staff/superuser who
             # teaches nothing is a pure admin; everyone else is a student.
