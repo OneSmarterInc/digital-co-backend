@@ -291,6 +291,19 @@ class InstructorSimulationDetailView(APIView):
             'total_rounds': ADMIN_TOTAL_ROUNDS,
             'completed': completed,
             'registration_url': _registration_url(request, cohort.registration_token),
+            # Whether this server can actually send email. The console backend
+            # "succeeds" — it prints — so an invitation records as delivered
+            # while nothing leaves the building. Faculty need to be told that
+            # once, at the server level, rather than inferring it per row.
+            'mail': {
+                'backend': getattr(settings, 'MAIL_BACKEND', 'console'),
+                'configured': bool(
+                    getattr(settings, 'MAIL_BACKEND', '') == 'mailjet'
+                    and getattr(settings, 'MAILJET_API_KEY', '')
+                    and getattr(settings, 'MAILJET_API_SECRET', '')
+                    and getattr(settings, 'MAIL_FROM_ADDRESS', '')
+                ),
+            },
             'instructors': [
                 {
                     'id': i.id,
@@ -930,6 +943,10 @@ class InstructorInsightsView(APIView):
 
         dims = ['strategic_judgment', 'execution_consequence', 'coherence', 'deliverable_quality']
         dim_totals = {d: 0 for d in dims}
+        # The mean alone hides the round that did the most work: a cohort where
+        # half the firms scored +2 and half -2 reads as a flat 0. Keep every
+        # value so the spread can be reported alongside it.
+        dim_values = {d: [] for d in dims}
         dim_count = 0
 
         firms = []
@@ -948,6 +965,7 @@ class InstructorInsightsView(APIView):
                     totals.append(cell['total'])
                     for k, v in d.items():
                         dim_totals[k] += v
+                        dim_values[k].append(v)
                     dim_count += 1
                 if score is not None:
                     traps += len(score.auto_components.get('trap_flags', []))
@@ -977,6 +995,19 @@ class InstructorInsightsView(APIView):
             'total_rounds': ADMIN_TOTAL_ROUNDS,
             'firms': firms,
             'dimension_averages': {d: round(dim_totals[d] / dim_count, 1) if dim_count else 0 for d in dims},
+            # Mean, range and how many firm-weeks landed either side of zero.
+            # `split` is the tell: a dimension with firms on both sides is one
+            # where the round separated them, whatever the mean says.
+            'dimension_spread': {
+                d: {
+                    'min': min(dim_values[d]) if dim_values[d] else 0,
+                    'max': max(dim_values[d]) if dim_values[d] else 0,
+                    'above': sum(1 for v in dim_values[d] if v > 0),
+                    'below': sum(1 for v in dim_values[d] if v < 0),
+                    'count': len(dim_values[d]),
+                }
+                for d in dims
+            },
             'graded_weeks_total': dim_count,
             'benchmarks': benchmarks,
         })
@@ -1146,7 +1177,9 @@ class InstructorMimicRunView(APIView):
                 'tier_outcome': run.tier_outcome,
             },
             'week': week,
-            'briefing': serialize.briefing_json(briefing_for(module, tier, run)),
+            'briefing': serialize.briefing_json(
+                briefing_for(module, tier, run), instance.preamble if instance else ''
+            ),
             'artifacts': serialize.artifacts_json(module.artifacts(tier)),
             'decision_spec': serialize.decision_spec_json(module.decision_spec(tier)),
             'advisors': [serialize.advisor_json(a) for a in AdvisorDefinition.objects.filter(active=True)],

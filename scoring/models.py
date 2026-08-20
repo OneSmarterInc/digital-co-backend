@@ -17,6 +17,14 @@ class ScoreRecord(models.Model):
     deliverable_quality = models.IntegerField(default=0)
     auto_components = models.JSONField(default=dict)
     instructor_components = models.JSONField(default=dict)
+    # What this record last contributed to the run's accumulated_scores. Grading
+    # adds to a running total, so re-grading has to reverse the previous
+    # contribution first — without this there is nothing to subtract and an edit
+    # would double-count exactly the way the pre-filled modal used to.
+    applied_scores = models.JSONField(default=dict, blank=True)
+    # Written feedback shown to the firm with their scores. Generated at grading,
+    # editable by the instructor before it publishes.
+    feedback = models.TextField(blank=True, default='')
     graded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

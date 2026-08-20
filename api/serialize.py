@@ -19,12 +19,19 @@ def week_status(instance):
     }
 
 
-def briefing_json(briefing):
+def briefing_json(briefing, preamble=''):
+    """The standing briefing, plus this firm's own opening if one was written.
+
+    The briefing itself is identical for every firm; the preamble is the only
+    firm-specific text on the page, which is why it travels as its own field
+    rather than being spliced into the body.
+    """
     return {
         'title': briefing.title,
         'body': briefing.body,
         'exec_reads': list(briefing.exec_reads),
         'signals': list(briefing.signals),
+        'preamble': preamble or '',
     }
 
 
@@ -157,4 +164,9 @@ def score_record_json(score):
             instance.run.state.get('through_lines', {}).get('coherence', {}).get('anchor_strength')
         ),
         'coherence_anchor': instance.run.state.get('coherence_anchor', ''),
+        'feedback': score.feedback,
+        # What this firm was shown above the briefing that round, so the
+        # instructor reads the same page the firm did.
+        'preamble': instance.preamble,
+        'preamble_problem': instance.preamble_problem,
     }

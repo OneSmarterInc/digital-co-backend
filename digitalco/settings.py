@@ -147,6 +147,7 @@ LOGOUT_REDIRECT_URL = 'login'
 # existing dev SECRET_KEY is used. For a public host, set DJANGO_DEBUG=0,
 # DJANGO_SECRET_KEY, and DJANGO_ALLOWED_HOSTS. See the deployment runbook.
 import os
+import sys
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", SECRET_KEY)
 DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
@@ -155,6 +156,13 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Section 7 un-stub: select a real advisor provider via the environment.
 DIGITALCO_LLM_PROVIDER = os.environ.get("DIGITALCO_LLM_PROVIDER", "echo")
+
+# Under `manage.py test`, never talk to a real provider. A developer .env sets a
+# live key for local play; without this the suite makes paid API calls and its
+# results depend on the network. Tests that exercise a generator pass their own
+# client explicitly, so this only affects code that resolves one implicitly.
+if "test" in sys.argv:
+    DIGITALCO_LLM_PROVIDER = "echo"
 
 # ---- email -----------------------------------------------------------------
 # Defaults to "console" on purpose: a checkout without credentials prints

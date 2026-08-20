@@ -55,6 +55,7 @@ urlpatterns = [
     # Instructor
     path('instructor/queue/', views.InstructorQueueView.as_view(), name='instructor_queue'),
     path('instructor/score/<int:score_id>/', views.InstructorScoreView.as_view(), name='instructor_score'),
+    path('instructor/score/<int:score_id>/feedback-draft/', views.InstructorFeedbackDraftView.as_view(), name='instructor_feedback_draft'),
     path('instructor/benchmarks/<int:cohort_id>/', views.InstructorBenchmarksView.as_view(), name='instructor_benchmarks'),
     path('instructor/benchmarks/<int:cohort_id>/reveal/<int:after_week>/', views.InstructorBenchmarkRevealView.as_view(), name='instructor_benchmark_reveal'),
     path('admin/simulations/', views.AdminSimulationsView.as_view(), name='admin_simulations'),

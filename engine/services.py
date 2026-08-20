@@ -3,6 +3,7 @@ from django.utils import timezone
 
 from scoring.models import Benchmark, ScoreRecord
 from core.state import FLAG_CATALOG
+from briefing.services import ensure_preamble
 from weeks.models import Submission, WeekInstance, WeekInstanceStatus
 from weeks.registry import registry
 
@@ -28,6 +29,10 @@ def view_briefing(run, *, week_number=None):
     instance.briefing_viewed_at = timezone.now()
     instance.status = WeekInstanceStatus.CONSULTATION
     instance.save(update_fields=['briefing_viewed_at', 'status', 'updated_at'])
+    # The firm-aware opening is written once, here, at the moment the round
+    # opens. ensure_preamble never raises: a briefing renders without it rather
+    # than not at all.
+    ensure_preamble(instance)
     return instance
 
 

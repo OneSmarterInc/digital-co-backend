@@ -26,6 +26,14 @@ class WeekInstance(models.Model):
     run = models.ForeignKey('core.Run', on_delete=models.CASCADE, related_name='week_instances')
     week_number = models.PositiveSmallIntegerField()
     briefing_viewed_at = models.DateTimeField(null=True, blank=True)
+    # Two or three generated sentences shown above this round's standing
+    # briefing, naming what this firm carried in. Stored rather than generated
+    # per request so every member of the firm reads the same words. The
+    # timestamp marks "we tried", so a blank preamble is not retried on every
+    # page load; the problem is kept for the instructor, never for the student.
+    preamble = models.TextField(blank=True, default='')
+    preamble_problem = models.CharField(max_length=255, blank=True, default='')
+    preamble_generated_at = models.DateTimeField(null=True, blank=True)
     submission = models.OneToOneField(
         'Submission',
         on_delete=models.SET_NULL,

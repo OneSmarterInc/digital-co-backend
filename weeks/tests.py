@@ -2453,3 +2453,96 @@ def week14_payload(overrides=None):
     return payload
 
 # Create your tests here.
+
+
+class RegradingIsIdempotentTests(TestCase):
+    """Editing a saved grade must overwrite, not accumulate.
+
+    Grading adds the merged score to the run's running total, so a second save
+    would count it twice — the same double-count as the pre-filled modal, in a
+    new place. The record remembers its contribution and reverses it first.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='regrade-student', password='pw')
+        self.cohort = Cohort.objects.create(name='SIM-REGRADE', tier=Tier.UNDERGRAD)
+        self.team = Team.objects.create(cohort=self.cohort, name='Team A')
+        self.team.members.add(self.user)
+        self.run = Run.objects.create(team=self.team)
+
+    def _record(self):
+        instance = view_briefing(self.run)
+        submit_week(
+            instance,
+            structured_payload=week1_payload(),
+            deliverable_text='A rigorous current-state memo with a 30-60-90 plan.',
+            submitted_by=self.user,
+        )
+        instance.refresh_from_db()
+        return instance.score_record
+
+    def test_regrading_replaces_rather_than_adds(self):
+        record = self._record()
+        auto = dict(record.auto_components['scores'])
+
+        finalize_score(record, instructor_scores={'coherence': 2})
+        self.run.refresh_from_db()
+        first = dict(self.run.state['accumulated_scores'])
+
+        # Same grade again: nothing should move.
+        finalize_score(record, instructor_scores={'coherence': 2})
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.state['accumulated_scores'], first)
+
+        # A different adjustment replaces the old one.
+        finalize_score(record, instructor_scores={'coherence': -1})
+        self.run.refresh_from_db()
+        record.refresh_from_db()
+        self.assertEqual(record.coherence, auto.get('coherence', 0) - 1)
+        self.assertEqual(
+            self.run.state['accumulated_scores']['coherence'],
+            auto.get('coherence', 0) - 1,
+        )
+
+    def test_the_weeks_state_update_runs_only_on_the_first_grading(self):
+        """Flags and through-lines follow from the decision, not the score, and
+        are not written to survive being applied twice."""
+        record = self._record()
+        finalize_score(record)
+        self.run.refresh_from_db()
+        after_first = {
+            'relationships': dict(self.run.state['relationships']),
+            'through_lines': str(self.run.state['through_lines']),
+            'flags': dict(self.run.state.get('flags', {})),
+        }
+
+        finalize_score(record)
+        self.run.refresh_from_db()
+        self.assertEqual(dict(self.run.state['relationships']), after_first['relationships'])
+        self.assertEqual(str(self.run.state['through_lines']), after_first['through_lines'])
+        self.assertEqual(dict(self.run.state.get('flags', {})), after_first['flags'])
+
+    def test_a_record_graded_before_applied_scores_existed_still_reverses(self):
+        """Rows graded by the old code carry their contribution in the dimension
+        columns; that is what gets reversed on the first edit."""
+        record = self._record()
+        finalize_score(record, instructor_scores={'coherence': 2})
+        # Simulate a pre-migration row.
+        record.applied_scores = {}
+        record.save(update_fields=['applied_scores'])
+        self.run.refresh_from_db()
+        before = dict(self.run.state['accumulated_scores'])
+
+        finalize_score(record, instructor_scores={'coherence': 2})
+        self.run.refresh_from_db()
+        self.assertEqual(self.run.state['accumulated_scores'], before)
+
+    def test_feedback_is_stored_when_supplied_and_left_alone_when_not(self):
+        record = self._record()
+        finalize_score(record, feedback='What held: you named a real trade-off.')
+        record.refresh_from_db()
+        self.assertIn('What held', record.feedback)
+
+        finalize_score(record, instructor_scores={'coherence': 1})
+        record.refresh_from_db()
+        self.assertIn('What held', record.feedback)   # not wiped by a re-grade

@@ -182,6 +182,9 @@ class StudentPerformanceView(APIView):
                 'scores': dims,
                 'total': sum(dims.values()),
                 'graded_at': score.graded_at.isoformat() if score.graded_at else None,
+                # The four numbers explain nothing on their own; this is what a
+                # student is actually meant to learn from.
+                'feedback': score.feedback,
             })
         best = max((r['total'] for r in rows), default=0)
         return Response({

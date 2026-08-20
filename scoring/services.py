@@ -22,8 +22,30 @@ def merge_score_components(auto_scores: dict, instructor_scores: dict) -> dict:
     return merged
 
 
-def finalize_score(score_record, *, instructor_scores=None, instructor_components=None, graded_by=None):
+def finalize_score(
+    score_record, *, instructor_scores=None, instructor_components=None,
+    graded_by=None, feedback=None,
+):
+    """Record a grade, and make re-grading safe.
+
+    Grading adds the merged score to the run's running total, so saving a grade
+    twice would count it twice. Each record therefore remembers what it last
+    contributed (applied_scores) and that contribution is reversed before the new
+    one is applied — an edit overwrites rather than accumulates.
+
+    The week's own state update (flags, through-lines, relationships) runs only
+    on the first grading. Those effects follow from the decision, not the score,
+    and are not written to be applied twice.
+    """
     instructor_scores = instructor_scores or {}
+    regrade = score_record.graded_at is not None
+    # Records graded before applied_scores existed still carry their contribution
+    # in the dimension columns, which is what was added at the time.
+    previously_applied = (
+        dict(score_record.applied_scores) if score_record.applied_scores
+        else (score_record.dimension_scores() if regrade else {})
+    )
+
     auto_scores = score_record.auto_components.get('scores', {})
     merged = merge_score_components(auto_scores, instructor_scores)
     for dimension, value in merged.items():
@@ -31,14 +53,20 @@ def finalize_score(score_record, *, instructor_scores=None, instructor_component
     score_record.instructor_components = instructor_components or score_record.instructor_components
     score_record.graded_by = graded_by or score_record.graded_by
     score_record.graded_at = timezone.now()
+    score_record.applied_scores = merged
+    if feedback is not None:
+        score_record.feedback = feedback
     score_record.save()
 
     week_instance = score_record.week_instance
     state = week_instance.run.state
+    for dimension, value in previously_applied.items():
+        state['accumulated_scores'][dimension] -= value
     for dimension, value in score_record.dimension_scores().items():
         state['accumulated_scores'][dimension] += value
     module = registry.get(week_instance.week_number)
-    state = module.finalize_state_update(score_record, state)
+    if not regrade:
+        state = module.finalize_state_update(score_record, state)
     week_instance.run.state = state
     week_instance.status = WeekInstanceStatus.SCORED
     week_instance.score_record = score_record

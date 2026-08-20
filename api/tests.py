@@ -18,7 +18,7 @@ from advisors.models import (
     BILLED, AdvisorDefinition, AdvisorSession, Conversation, GroupSession,
 )
 from core.models import (
-    DEFAULT_ADVISOR_HOURLY_RATE, Cohort, Enrollment, Run, Team, Tier, User, UserRole,
+    DEFAULT_ADVISOR_HOURLY_RATE, Cohort, Enrollment, Invitation, Run, Team, Tier, User, UserRole,
 )
 from core.state import SCORE_DIMENSIONS
 from engine.services import submit_week, view_briefing
@@ -815,3 +815,57 @@ class CoFacultyTests(TestCase):
         self.assertEqual(self._add({'email': 'x@example.com', 'first_name': 'X'},
                                    user=self.outsider).status_code, 404)
         self.assertEqual(self._remove(self.owner.id, user=self.outsider).status_code, 404)
+
+
+class MailConfigVisibilityTests(TestCase):
+    """The console backend 'succeeds' by printing, so invitations stamp as sent
+    while nothing leaves the server. Faculty have to be told that at the server
+    level, or the delivery counter reads green and lies."""
+
+    def setUp(self):
+        self.instructor = User.objects.create_user(
+            username='mailcfg@example.com', password='pw', role=UserRole.INSTRUCTOR,
+        )
+        self.cohort = Cohort.objects.create(name='SIM-MAILCFG', tier=Tier.UNDERGRAD)
+        self.cohort.instructors.add(self.instructor)
+
+    def _detail(self):
+        request = APIRequestFactory().get('/x')
+        force_authenticate(request, user=self.instructor)
+        return InstructorSimulationDetailView.as_view()(request, cohort_id=self.cohort.id)
+
+    def test_console_backend_reports_mail_as_not_configured(self):
+        with self.settings(MAIL_BACKEND='console'):
+            mail = self._detail().data['mail']
+        self.assertEqual(mail['backend'], 'console')
+        self.assertFalse(mail['configured'])
+
+    def test_mailjet_without_credentials_is_still_not_configured(self):
+        with self.settings(MAIL_BACKEND='mailjet', MAILJET_API_KEY='', MAILJET_API_SECRET='',
+                           MAIL_FROM_ADDRESS=''):
+            self.assertFalse(self._detail().data['mail']['configured'])
+
+    def test_fully_configured_mailjet_reports_live(self):
+        with self.settings(MAIL_BACKEND='mailjet', MAILJET_API_KEY='k',
+                           MAILJET_API_SECRET='s', MAIL_FROM_ADDRESS='from@example.com'):
+            mail = self._detail().data['mail']
+        self.assertTrue(mail['configured'])
+        self.assertEqual(mail['backend'], 'mailjet')
+
+    def test_the_console_backend_still_stamps_an_invitation_as_sent(self):
+        """Documents the trap this warning exists for: sent_at is set even
+        though nothing was emailed, so per-row status alone cannot reveal it."""
+        import secrets as _s
+        from mailer import backends
+        from mailer.invites import send_invitation
+        backends.set_backend(backends.ConsoleBackend())
+        self.addCleanup(backends.set_backend, None)
+
+        inv = Invitation.objects.create(
+            cohort=self.cohort, email='x@example.com', token=_s.token_urlsafe(24),
+        )
+        sent, _detail = send_invitation(inv)
+        inv.refresh_from_db()
+        self.assertTrue(sent)
+        self.assertIsNotNone(inv.sent_at)
+        self.assertEqual(inv.send_error, '')

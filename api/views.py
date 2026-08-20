@@ -33,6 +33,7 @@ from core.models import (
 from core.state import SCORE_DIMENSIONS
 from engine.climax import generate_debrief
 from help.services import HelpService
+from feedback.services import generate_feedback
 from mailer.accounts import send_faculty_invite
 from engine.services import (
     InvalidTransition, get_or_create_week_instance, submit_week, view_briefing,
@@ -163,7 +164,7 @@ class RunView(APIView):
                 'tier_outcome': run.tier_outcome,
             },
             'week': serialize.week_status(instance),
-            'briefing': serialize.briefing_json(briefing_for(module, tier, run)),
+            'briefing': serialize.briefing_json(briefing_for(module, tier, run), instance.preamble),
             'artifacts': serialize.artifacts_json(module.artifacts(tier)),
             'decision_spec': serialize.decision_spec_json(module.decision_spec(tier)),
             'advisors': [serialize.advisor_json(a) for a in AdvisorDefinition.objects.filter(active=True)],
@@ -576,11 +577,20 @@ class InstructorScoreView(APIView):
         score = get_object_or_404(ScoreRecord, id=score_id)
         scores = request.data.get('scores') or {}
         instructor_scores = {dimension: int(scores.get(dimension, 0)) for dimension in SCORE_DIMENSIONS}
+
+        # The instructor edits a draft here, unlike the score boxes which are an
+        # adjustment. Absent from the payload means "leave it alone", which is
+        # what a re-grade that only touches the numbers should do.
+        feedback = request.data.get('feedback')
+        if feedback is not None:
+            feedback = str(feedback).strip()
+
         finalize_score(
             score,
             instructor_scores=instructor_scores,
             instructor_components=request.data.get('instructor_components') or {},
             graded_by=request.user,
+            feedback=feedback,
         )
         anchor = request.data.get('anchor_strength')
         if anchor in ANCHOR_STRENGTHS and score.week_instance.week_number == 1:
@@ -590,6 +600,22 @@ class InstructorScoreView(APIView):
             run.save()
         score.refresh_from_db()
         return Response(serialize.score_record_json(score))
+
+
+class InstructorFeedbackDraftView(APIView):
+    """Generate a feedback draft for a submitted round.
+
+    Separate from saving the grade so the instructor sees the draft, edits it,
+    and only then commits — and so a slow or failed generation never blocks
+    grading. Returns an empty draft with a reason rather than an error.
+    """
+
+    permission_classes = [IsAuthenticated, IsInstructor]
+
+    def post(self, request, score_id):
+        score = get_object_or_404(ScoreRecord, id=score_id)
+        text, problem = generate_feedback(score)
+        return Response({'feedback': text, 'problem': problem})
 
 
 class InstructorBenchmarksView(APIView):
