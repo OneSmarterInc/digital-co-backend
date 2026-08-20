@@ -171,16 +171,38 @@ class InviteRedemptionTests(MailerTestCase):
         invitation = self._invitation(team=self.team)
         self.assertEqual(self._accept(invitation.token).status_code, 201)
         second = self._accept(invitation.token)
-        self.assertEqual(second.status_code, 404)
+        self.assertNotEqual(second.status_code, 201)
+        self.assertEqual(second.data['reason'], 'already_accepted')
         self.assertEqual(User.objects.filter(username='student@example.com').count(), 1)
 
-    def test_unknown_and_used_tokens_are_indistinguishable(self):
+    def test_an_unknown_token_stays_opaque(self):
+        """Nothing about an unknown token may hint at who was invited: the
+        endpoint is public, so a distinguishable answer would turn it into a
+        way to test addresses against the roster."""
+        unknown = self._detail('not-a-real-token')
+        self.assertEqual(unknown.status_code, 404)
+        self.assertEqual(unknown.data['reason'], 'unknown')
+        self.assertNotIn('email', unknown.data)
+
+    def test_a_spent_token_says_so_and_names_its_own_address(self):
+        """The caller is holding this row's own 24-byte token, so they cannot
+        have guessed it and nothing is disclosed. Staying opaque only stranded
+        the person the link belongs to, telling them to chase an instructor for
+        an invitation they had already redeemed."""
         invitation = self._invitation()
         self._accept(invitation.token)
         used = self._detail(invitation.token)
-        unknown = self._detail('not-a-real-token')
-        self.assertEqual(used.status_code, unknown.status_code, 404)
-        self.assertEqual(used.data['detail'], unknown.data['detail'])
+        self.assertEqual(used.status_code, 409)
+        self.assertEqual(used.data['reason'], 'already_accepted')
+        self.assertEqual(used.data['email'], invitation.email)
+
+    def test_a_spent_token_is_still_refused(self):
+        """Naming the state must not become a way through it."""
+        invitation = self._invitation()
+        self._accept(invitation.token)
+        again = self._accept(invitation.token, password='a-different-password')
+        self.assertEqual(again.status_code, 409)
+        self.assertEqual(User.objects.filter(username=invitation.email).count(), 1)
 
     def test_a_short_password_is_rejected_per_field(self):
         invitation = self._invitation()

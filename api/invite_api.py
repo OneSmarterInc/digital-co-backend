@@ -23,11 +23,40 @@ from mailer.enrolment import send_enrolment_confirmation
 MIN_PASSWORD_LENGTH = 8
 
 
-def _gone():
-    """One response for unknown, expired and already-used tokens alike, so the
-    endpoint reveals nothing about who was invited."""
+def _gone(token=None):
+    """404 for a token this endpoint will not act on.
+
+    An unknown token stays deliberately opaque, so the endpoint cannot be used
+    to probe which addresses were invited.
+
+    A token that matches an already-accepted invitation is different, and is
+    answered plainly. The caller is holding 24 bytes of urlsafe randomness for
+    that exact row — they cannot have guessed it, so naming its state reveals
+    nothing they did not already have. Withholding it only stranded the one
+    person the link belongs to: their account exists, and the page was telling
+    them to ask for a new invitation they do not need.
+    """
+    if token:
+        spent = (
+            Invitation.objects
+            .filter(token=token)
+            .exclude(status=InvitationStatus.PENDING)
+            .first()
+        )
+        if spent:
+            return Response(
+                {
+                    'detail': 'This invitation has already been set up. Sign in instead.',
+                    'reason': 'already_accepted',
+                    'email': spent.email,
+                },
+                status=409,
+            )
     return Response(
-        {'detail': 'This invitation link is not valid. It may have already been used.'},
+        {
+            'detail': 'This invitation link is not valid. It may have already been used.',
+            'reason': 'unknown',
+        },
         status=404,
     )
 
@@ -52,7 +81,7 @@ class InviteDetailView(APIView):
     def get(self, request, token):
         invitation = _open_invitation(token)
         if not invitation or not invitation.cohort:
-            return _gone()
+            return _gone(token)
         cohort = invitation.cohort
         return Response({
             'email': invitation.email,
@@ -76,7 +105,7 @@ class InviteAcceptView(APIView):
     def post(self, request, token):
         invitation = _open_invitation(token)
         if not invitation or not invitation.cohort:
-            return _gone()
+            return _gone(token)
 
         errors = {}
         first_name = (request.data.get('first_name') or '').strip()
@@ -105,7 +134,7 @@ class InviteAcceptView(APIView):
                 .first()
             )
             if not locked:
-                return _gone()
+                return _gone(token)
 
             user = existing
             if user is None:
