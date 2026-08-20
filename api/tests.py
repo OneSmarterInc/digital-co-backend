@@ -27,6 +27,7 @@ from scoring.models import ScoreRecord
 from weeks.models import Submission, WeekInstance, WeekInstanceStatus
 
 from .instructor_api import (
+    InstructorCoFacultyDetailView, InstructorCoFacultyView,
     InstructorFirmDetailView, InstructorFirmsView, InstructorMoveEnrollmentView,
     InstructorSimulationDetailView, _advisor_usage_by_student, _billing,
 )
@@ -723,3 +724,94 @@ class AdminCreateFacultyTests(TestCase):
             username='plain@example.com', password='pw', role=UserRole.INSTRUCTOR,
         )
         self.assertEqual(self._post({'email': 'x@example.com', 'first_name': 'A'}, user=plain).status_code, 403)
+
+
+class CoFacultyTests(TestCase):
+    """Faculty staff their own cohort. Previously only an admin could attach an
+    instructor, at provisioning, so bringing in a TA mid-term meant going back
+    to whoever holds admin."""
+
+    def setUp(self):
+        from mailer import backends
+        from mailer.backends import LocmemBackend
+        self.outbox = LocmemBackend()
+        backends.set_backend(self.outbox)
+        self.addCleanup(backends.set_backend, None)
+
+        self.owner = User.objects.create_user(
+            username='owner@example.com', password='pw', role=UserRole.INSTRUCTOR, first_name='Ada',
+        )
+        self.cohort = Cohort.objects.create(name='SIM-COFAC', tier=Tier.UNDERGRAD)
+        self.cohort.instructors.add(self.owner)
+        self.outsider = User.objects.create_user(
+            username='outsider@example.com', password='pw', role=UserRole.INSTRUCTOR,
+        )
+
+    def _add(self, body, user=None):
+        request = APIRequestFactory().post('/x', body, format='json')
+        force_authenticate(request, user=user or self.owner)
+        return InstructorCoFacultyView.as_view()(request, cohort_id=self.cohort.id)
+
+    def _remove(self, user_id, user=None):
+        request = APIRequestFactory().delete('/x')
+        force_authenticate(request, user=user or self.owner)
+        return InstructorCoFacultyDetailView.as_view()(
+            request, cohort_id=self.cohort.id, user_id=user_id,
+        )
+
+    def test_adding_an_existing_instructor_attaches_them_without_email(self):
+        resp = self._add({'email': 'outsider@example.com'})
+        self.assertEqual(resp.status_code, 201)
+        self.assertFalse(resp.data['created'])
+        self.assertIn(self.outsider, self.cohort.instructors.all())
+        self.assertEqual(len(self.outbox.outbox), 0)   # they already have an account
+
+    def test_adding_an_unknown_address_creates_them_and_sends_a_set_password_link(self):
+        resp = self._add({'email': 'ta@example.com', 'first_name': 'Grace', 'last_name': 'Hopper'})
+        self.assertEqual(resp.status_code, 201)
+        self.assertTrue(resp.data['created'])
+        self.assertTrue(resp.data['invite_sent'])
+
+        ta = User.objects.get(username='ta@example.com')
+        self.assertEqual(ta.role, UserRole.INSTRUCTOR)
+        self.assertFalse(ta.has_usable_password())
+        self.assertIn(ta, self.cohort.instructors.all())
+        self.assertIn('/set-password/', self.outbox.outbox[0].text)
+
+    def test_a_new_instructor_needs_a_name(self):
+        resp = self._add({'email': 'nameless@example.com'})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('first_name', resp.data['errors'])
+        self.assertFalse(User.objects.filter(username='nameless@example.com').exists())
+
+    def test_duplicates_students_and_junk_are_refused(self):
+        self._add({'email': 'outsider@example.com'})
+        User.objects.create_user(username='pupil@example.com', password='pw', role=UserRole.STUDENT)
+        for body, field in [
+            ({'email': 'outsider@example.com'}, 'email'),   # already teaches it
+            ({'email': 'pupil@example.com'}, 'email'),      # a student account
+            ({'email': 'nope'}, 'email'),
+        ]:
+            resp = self._add(body)
+            self.assertEqual(resp.status_code, 400, body)
+            self.assertIn(field, resp.data['errors'], body)
+
+    def test_removing_a_co_teacher_leaves_the_account_alone(self):
+        self._add({'email': 'outsider@example.com'})
+        resp = self._remove(self.outsider.id)
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn(self.outsider, self.cohort.instructors.all())
+        self.assertTrue(User.objects.filter(pk=self.outsider.pk).exists())
+
+    def test_the_last_instructor_cannot_be_removed(self):
+        """A cohort with nobody teaching it is unreachable — every instructor
+        endpoint scopes by who teaches it, so no one could add one back."""
+        resp = self._remove(self.owner.id)
+        self.assertEqual(resp.status_code, 409)
+        self.assertIn('only instructor', resp.data['detail'])
+        self.assertIn(self.owner, self.cohort.instructors.all())
+
+    def test_someone_elses_cohort_is_untouchable(self):
+        self.assertEqual(self._add({'email': 'x@example.com', 'first_name': 'X'},
+                                   user=self.outsider).status_code, 404)
+        self.assertEqual(self._remove(self.owner.id, user=self.outsider).status_code, 404)

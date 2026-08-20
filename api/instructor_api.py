@@ -27,6 +27,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from advisors.models import BILLED, AdvisorSession
+from mailer.accounts import send_faculty_invite
 from mailer.invites import send_invitation
 from core.models import (
     Cohort, Enrollment, Invitation, InvitationStatus, Run, RunStatus, Team, User, UserRole,
@@ -594,6 +595,104 @@ class InstructorMoveEnrollmentView(APIView):
             enrollment.team = team
             enrollment.save(update_fields=['team'])
         return Response({'ok': True, 'firm': team.name})
+
+
+# ---- co-faculty -----------------------------------------------------------
+
+class InstructorCoFacultyView(APIView):
+    """Add a co-teacher to a cohort.
+
+    Faculty could only be attached by an admin at provisioning, so bringing in a
+    TA or a co-lecturer mid-term meant going back to whoever holds admin. An
+    instructor already trusted with a cohort can staff it.
+
+    If the address has no account yet, one is created and the person is emailed
+    a link to choose their own password — the same flow the admin console uses.
+    """
+
+    permission_classes = [IsAuthenticated, IsInstructor]
+
+    def post(self, request, cohort_id):
+        cohort = _cohort_for(request, cohort_id)
+        email = (request.data.get('email') or '').strip().lower()
+        first_name = (request.data.get('first_name') or '').strip()
+        last_name = (request.data.get('last_name') or '').strip()
+
+        errors = {}
+        if not email or '@' not in email:
+            errors['email'] = 'Enter a valid email address.'
+        if errors:
+            return Response({'detail': 'Some fields need attention.', 'errors': errors}, status=400)
+
+        existing = User.objects.filter(username__iexact=email).first()
+        invited = False
+
+        if existing:
+            if existing.role != UserRole.INSTRUCTOR:
+                return Response({
+                    'detail': 'Some fields need attention.',
+                    'errors': {'email': 'That email belongs to a student account.'},
+                }, status=400)
+            if cohort.instructors.filter(pk=existing.pk).exists():
+                return Response({
+                    'detail': 'Some fields need attention.',
+                    'errors': {'email': 'They already teach this simulation.'},
+                }, status=400)
+            user = existing
+        else:
+            if not first_name:
+                return Response({
+                    'detail': 'Some fields need attention.',
+                    'errors': {'first_name': 'New instructors need a first name.'},
+                }, status=400)
+            user = User.objects.create_user(
+                username=email, email=email, password=None,
+                first_name=first_name, last_name=last_name, role=UserRole.INSTRUCTOR,
+            )
+            invited = True
+
+        cohort.instructors.add(user)
+
+        sent, url, error = (True, '', '')
+        if invited:
+            sent, url, error = send_faculty_invite(user, invited_by=request.user)
+
+        return Response({
+            'id': user.id,
+            'username': user.username,
+            'name': (user.get_full_name() or '').strip() or user.username,
+            'created': invited,
+            'invite_sent': sent if invited else None,
+            **({'set_password_url': url, 'send_error': error} if invited and not sent else {}),
+        }, status=201)
+
+
+class InstructorCoFacultyDetailView(APIView):
+    """Remove a co-teacher from a cohort.
+
+    The account is untouched — this only unlinks them from this cohort, and only
+    while somebody is left teaching it. A cohort with no instructors is
+    unreachable: every instructor endpoint scopes by who teaches it, so nobody
+    could add one back.
+    """
+
+    permission_classes = [IsAuthenticated, IsInstructor]
+
+    def delete(self, request, cohort_id, user_id):
+        cohort = _cohort_for(request, cohort_id)
+        user = get_object_or_404(User, id=user_id)
+        if not cohort.instructors.filter(pk=user.pk).exists():
+            return Response({'detail': 'They do not teach this simulation.'}, status=404)
+        if cohort.instructors.count() <= 1:
+            return Response({
+                'detail': (
+                    'This is the only instructor on the simulation. Add someone else '
+                    'before removing them, or nobody will be able to reach it.'
+                ),
+            }, status=409)
+
+        cohort.instructors.remove(user)
+        return Response({'ok': True, 'removed': (user.get_full_name() or '').strip() or user.username})
 
 
 # ---- firms: create, delete ------------------------------------------------
