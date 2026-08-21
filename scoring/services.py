@@ -78,6 +78,12 @@ def finalize_score(
         week_instance.run.status = 'COMPLETE'
         week_instance.run.save()
     if week_instance.week_number in BENCHMARK_PHASE_WEEKS:
+        # Always computed, never gated here. Week 5 has a hard dependency on a
+        # Benchmark existing for the cohort (engine.services checks
+        # 'benchmarks.latest'), so withholding computation would freeze every
+        # firm at Week 5 until the slowest one was graded — and freeze them
+        # permanently if a firm never submits. Whether the standings are fit to
+        # *show* is a separate question, answered by benchmark_ready().
         compute_benchmark(week_instance.run.team.cohort, week_instance.week_number)
     return score_record
 
@@ -86,11 +92,69 @@ def compute_endgame_outcome(run_state: dict):
     return resolve_endgame(run_state)
 
 
+def benchmark_firms(cohort):
+    """The firms a benchmark ranks: those taking part.
+
+    A firm is created with a run already attached, so an unfilled one would
+    otherwise sit permanently ungraded and hold the whole cohort's standings
+    hostage — as well as appearing in them on zero.
+
+    Taking part means having members, or having played at least one round.
+    The second half matters: a firm whose students were moved out mid-term has
+    still earned its place in the table.
+    """
+    from weeks.models import WeekInstance
+
+    played = set(
+        WeekInstance.objects
+        .filter(run__team__cohort=cohort)
+        .values_list('run__team_id', flat=True)
+    )
+    return [
+        team for team in cohort.teams.select_related('run').prefetch_related('members')
+        if getattr(team, 'run', None) is not None
+        and (team.members.exists() or team.id in played)
+    ]
+
+
+def benchmark_pending(cohort, after_week: int):
+    """Firms still owing a grade for this round. Empty list means ready."""
+    from weeks.models import WeekInstance
+
+    graded = set(
+        WeekInstance.objects
+        .filter(
+            run__team__cohort=cohort,
+            week_number=after_week,
+            status=WeekInstanceStatus.SCORED,
+        )
+        .values_list('run__team_id', flat=True)
+    )
+    return [team for team in benchmark_firms(cohort) if team.id not in graded]
+
+
+def benchmark_ready(cohort, after_week: int) -> bool:
+    """True when the standings for this round are fit to show.
+
+    Standings rank firms against each other on accumulated score, so a firm
+    that is merely *not yet graded* has a smaller total and is indistinguishable
+    from one that played badly. A partially graded table is not a provisional
+    result — it is a wrong one, so it is withheld rather than captioned.
+
+    A cohort with no playing firms is never ready: there is nothing to rank,
+    and an empty table reads as a result rather than an absence.
+    """
+    firms = benchmark_firms(cohort)
+    if not firms:
+        return False
+    return not benchmark_pending(cohort, after_week)
+
+
 def compute_benchmark(cohort, after_week: int):
     if after_week not in BENCHMARK_PHASE_WEEKS:
         raise ValueError(f'Benchmarks can only be computed after weeks {BENCHMARK_PHASE_WEEKS}.')
     standings = []
-    for team in cohort.teams.select_related('run'):
+    for team in benchmark_firms(cohort):
         run = team.run
         total = sum(run.state['accumulated_scores'].values())
         trust_points = _phase_trust_points(run.state, after_week)

@@ -39,7 +39,7 @@ from engine.services import (
     InvalidTransition, get_or_create_week_instance, submit_week, view_briefing,
 )
 from scoring.models import Benchmark, ScoreRecord
-from scoring.services import finalize_score, student_benchmark_payload
+from scoring.services import finalize_score, reveal_benchmark, student_benchmark_payload
 from weeks.models import WeekInstanceStatus
 from weeks.registry import registry
 
@@ -622,12 +622,31 @@ class InstructorBenchmarksView(APIView):
     permission_classes = [IsAuthenticated, IsInstructor]
 
     def get(self, request, cohort_id):
+        from scoring.services import benchmark_pending
+
         cohort = get_object_or_404(Cohort, id=cohort_id)
         benchmarks = Benchmark.objects.filter(cohort=cohort).order_by('after_week')
         rows = []
         for b in benchmarks:
+            # A partially graded table is not provisional, it is wrong: an
+            # ungraded firm has a smaller accumulated total and ranks exactly
+            # like one that played badly. Withhold the standings and name who
+            # is outstanding instead. The record is still computed — Week 5
+            # depends on a Benchmark existing — this only governs what is shown.
+            pending = [t.name for t in benchmark_pending(cohort, b.after_week)]
+            if pending:
+                rows.append({
+                    'after_week': b.after_week,
+                    'standings': [],
+                    'is_revealed': b.is_revealed,
+                    'on_hold': True,
+                    'pending_firms': pending,
+                })
+                continue
             row = student_benchmark_payload(b)
             row['is_revealed'] = b.is_revealed
+            row['on_hold'] = False
+            row['pending_firms'] = []
             rows.append(row)
         return Response(rows)
 
@@ -683,9 +702,11 @@ class InstructorBenchmarkRevealView(APIView):
         if not request.user.instructed_cohorts.filter(id=cohort.id).exists():
             return Response({'detail': 'Not your cohort.'}, status=403)
         benchmark = get_object_or_404(Benchmark, cohort=cohort, after_week=after_week)
+        # `is_revealed` is a read-only property over `revealed_at`. Assigning to
+        # it shadowed the property and then save(update_fields=['is_revealed'])
+        # raised, because no such column exists — so revealing always 500'd.
         if not benchmark.is_revealed:
-            benchmark.is_revealed = True
-            benchmark.save(update_fields=['is_revealed'])
+            reveal_benchmark(benchmark)
         return Response({'after_week': benchmark.after_week, 'is_revealed': True})
 
 

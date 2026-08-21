@@ -2,7 +2,12 @@
 so the guards are the whole safety story: it must not name the scoring, must not
 tell a firm what to decide, and must never break a briefing when it fails.
 """
+from unittest.mock import patch
+
 from django.test import TestCase
+from rest_framework.test import APIRequestFactory, force_authenticate
+
+from api.views import RunView
 
 from briefing.prompts import SYSTEM_PROMPT, is_usable
 from briefing.services import build_context, ensure_preamble, generate_preamble
@@ -161,3 +166,68 @@ class EnsureTests(TestCase):
         self.assertEqual(instance.preamble, '')
         from weeks.models import WeekInstanceStatus
         self.assertEqual(instance.status, WeekInstanceStatus.CONSULTATION)
+
+
+class PerPageLoadTests(TestCase):
+    """Every student in a firm must read identical text, and it must not change
+    between readings. That means the preamble is written once when the round
+    opens and stored — never regenerated when a page is loaded.
+    """
+
+    def setUp(self):
+        cohort = Cohort.objects.create(name='SIM-LOAD', tier=Tier.UNDERGRAD)
+        team = Team.objects.create(cohort=cohort, name='Team A')
+        self.a = User.objects.create_user(username='load-a@example.com', password='pw')
+        self.b = User.objects.create_user(username='load-b@example.com', password='pw')
+        team.members.add(self.a, self.b)
+        self.run = Run.objects.create(team=team, current_week=4)
+        self.run.state = {
+            **self.run.state,
+            'coherence_anchor': 'Data platform before ERP, and we accept the delay.',
+            'decision_history': [{'week': 1, 'choices': {'posture': 'consolidate'}}],
+        }
+        self.run.save()
+
+    def test_the_model_is_called_once_no_matter_how_many_times_it_is_read(self):
+        stub = _Stub(GOOD)
+        with patch('briefing.services.get_llm_client', return_value=stub):
+            first = view_briefing(self.run)
+            # Every subsequent open of the same round, by anyone in the firm.
+            for _ in range(4):
+                view_briefing(self.run)
+        self.assertEqual(stub.calls, 1)
+        self.assertEqual(first.preamble, GOOD)
+
+    def test_two_students_in_the_same_firm_read_the_same_words(self):
+        with patch('briefing.services.get_llm_client', return_value=_Stub(GOOD)):
+            view_briefing(self.run)
+
+        seen = set()
+        for student in (self.a, self.b):
+            request = APIRequestFactory().get('/api/run/')
+            force_authenticate(request, user=student)
+            resp = RunView.as_view()(request)
+            self.assertEqual(resp.status_code, 200)
+            seen.add(resp.data['briefing']['preamble'])
+        self.assertEqual(seen, {GOOD})
+
+    def test_the_stored_text_survives_a_model_that_later_answers_differently(self):
+        with patch('briefing.services.get_llm_client', return_value=_Stub(GOOD)):
+            view_briefing(self.run)
+        drifted = _Stub('You are carrying something else entirely into this round now.')
+        with patch('briefing.services.get_llm_client', return_value=drifted):
+            again = view_briefing(self.run)
+        self.assertEqual(again.preamble, GOOD)
+        self.assertEqual(drifted.calls, 0)
+
+    def test_round_one_stores_no_preamble_and_never_asks(self):
+        run = Run.objects.create(
+            team=Team.objects.create(
+                cohort=Cohort.objects.get(name='SIM-LOAD'), name='Team B',
+            ),
+        )
+        stub = _Stub(GOOD)
+        with patch('briefing.services.get_llm_client', return_value=stub):
+            instance = view_briefing(run)
+        self.assertEqual(instance.preamble, '')
+        self.assertEqual(stub.calls, 0)

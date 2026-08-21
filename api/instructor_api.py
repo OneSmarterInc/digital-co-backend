@@ -988,12 +988,38 @@ class InstructorInsightsView(APIView):
             })
         firms.sort(key=lambda f: (-f['total_score'], f['number']))
 
-        benchmarks = [student_benchmark_payload(b) for b in Benchmark.objects.filter(cohort=cohort).order_by('after_week')]
+        # Same withholding rule as the Benchmarks screen: a table missing a
+        # firm ranks the rest wrongly, so it is not shown until the round is
+        # fully graded. benchmark_status below says who is outstanding.
+        from scoring.services import benchmark_pending as _pending
+        benchmarks = [
+            student_benchmark_payload(b)
+            for b in Benchmark.objects.filter(cohort=cohort).order_by('after_week')
+            if not _pending(cohort, b.after_week)
+        ]
+
+        # A benchmark round only publishes once every playing firm is graded.
+        # Without this the gate is indistinguishable from a bug: the instructor
+        # grades a Week 4 and no standings appear, with nothing on screen
+        # saying who is still outstanding.
+        from scoring.config import BENCHMARK_PHASE_WEEKS
+        from scoring.services import benchmark_pending
+        benchmark_status = None
+        due = [w for w in BENCHMARK_PHASE_WEEKS if w <= current_week]
+        if due:
+            after_week = max(due)
+            pending = benchmark_pending(cohort, after_week)
+            benchmark_status = {
+                'after_week': after_week,
+                'published': any(b['after_week'] == after_week for b in benchmarks),
+                'pending_firms': [t.name for t in pending],
+            }
 
         return Response({
             'current_week': current_week,
             'total_rounds': ADMIN_TOTAL_ROUNDS,
             'firms': firms,
+            'benchmark_status': benchmark_status,
             'dimension_averages': {d: round(dim_totals[d] / dim_count, 1) if dim_count else 0 for d in dims},
             # Mean, range and how many firm-weeks landed either side of zero.
             # `split` is the tell: a dimension with firms on both sides is one
