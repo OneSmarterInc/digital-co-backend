@@ -23,6 +23,7 @@ from core.models import (
 )
 from core.state import SCORE_DIMENSIONS
 from engine.services import submit_week, view_briefing
+from scoring.services import finalize_score
 from weeks.tests import week1_payload
 from scoring.models import ScoreRecord
 from weeks.models import Submission, WeekInstance, WeekInstanceStatus
@@ -1017,3 +1018,78 @@ class MailConfigVisibilityTests(TestCase):
         self.assertTrue(sent)
         self.assertIsNotNone(inv.sent_at)
         self.assertEqual(inv.send_error, '')
+
+
+class StudentBenchmarkStateTests(TestCase):
+    """What a student may learn about withheld standings.
+
+    Enough to know it is pending rather than broken, and nothing more: no firm
+    names, no count of who is outstanding, no partial figures. A count is a
+    small leak that compounds across a cohort that talks to each other.
+    """
+
+    def setUp(self):
+        self.cohort = Cohort.objects.create(name='SIM-BSTATE', tier=Tier.UNDERGRAD)
+        self.firms = []
+        for n in (1, 2):
+            team = Team.objects.create(cohort=self.cohort, name=f'Team {n}')
+            student = User.objects.create_user(
+                username=f'bstate-{n}@example.com', password='pw', role=UserRole.STUDENT,
+            )
+            team.members.add(student)
+            Enrollment.objects.create(cohort=self.cohort, student=student, team=team)
+            self.firms.append((Run.objects.create(team=team), student))
+
+    def _performance(self, student):
+        request = APIRequestFactory().get(f'/api/student/performance/?cohort={self.cohort.id}')
+        force_authenticate(request, user=student)
+        return StudentPerformanceView.as_view()(request).data
+
+    def _play_to_week_4(self, run, student):
+        from weeks.tests import week2_payload, week3_payload, week4_payload
+        payloads = {1: week1_payload, 2: week2_payload, 3: week3_payload, 4: week4_payload}
+        for week in range(1, 5):
+            run.refresh_from_db()
+            run.current_week = week
+            run.save()
+            instance = view_briefing(run)
+            submit_week(
+                instance,
+                structured_payload=payloads[week](),
+                deliverable_text='A considered memo with a clear plan.',
+                submitted_by=student,
+            )
+            instance.refresh_from_db()
+            if week < 4:
+                finalize_score(instance.score_record)
+        return instance.score_record
+
+    def test_before_any_checkpoint_there_is_nothing_to_say(self):
+        run, student = self.firms[0]
+        self.assertIsNone(self._performance(student)['benchmark'])
+
+    def test_pending_is_stated_without_naming_anyone(self):
+        records = [self._play_to_week_4(run, s) for run, s in self.firms]
+        finalize_score(records[0])  # one firm graded, one outstanding
+
+        run, student = self.firms[0]
+        run.refresh_from_db()
+        state = self._performance(student)['benchmark']
+        self.assertEqual(state, {'after_week': 4, 'status': 'pending'})
+
+        # Nothing about who, how many, or how they are doing.
+        blob = str(self._performance(student)).lower()
+        for leak in ('team 2', 'team 1', 'pending_firms', 'standings', 'rank'):
+            self.assertNotIn(leak, blob, f'student payload leaked {leak!r}')
+
+    def test_it_flips_to_published_when_the_last_firm_is_graded(self):
+        records = [self._play_to_week_4(run, s) for run, s in self.firms]
+        for record in records:
+            finalize_score(record)
+
+        run, student = self.firms[0]
+        run.refresh_from_db()
+        self.assertEqual(
+            self._performance(student)['benchmark'],
+            {'after_week': 4, 'status': 'published'},
+        )

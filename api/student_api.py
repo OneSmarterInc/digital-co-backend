@@ -142,6 +142,40 @@ class MyProfileView(APIView):
         }
 
 
+
+def _benchmark_state(run):
+    """What a student may know about standings at a checkpoint round.
+
+    Standings are withheld until every firm in the cohort has the round graded,
+    because a firm that is merely ungraded ranks exactly like one that played
+    badly. Without saying so, a student at a checkpoint sees nothing and cannot
+    tell "not yet" from "broken" — which produces the very questions the
+    withholding was meant to prevent.
+
+    Deliberately says only that it is pending. No firm names, no count of who
+    is outstanding, no partial figures: which firms are behind is not a
+    student's business, and a count is a small leak that compounds across a
+    cohort that talks to each other.
+    """
+    from scoring.config import BENCHMARK_PHASE_WEEKS
+    from scoring.models import Benchmark
+    from scoring.services import benchmark_ready
+
+    cohort = run.team.cohort
+    reached = [w for w in BENCHMARK_PHASE_WEEKS if w <= run.current_week]
+    if not reached:
+        return None
+
+    after_week = max(reached)
+    if not Benchmark.objects.filter(cohort=cohort, after_week=after_week).exists():
+        # The round has not been graded for anyone yet — nothing is pending
+        # from the student's point of view, it simply has not happened.
+        return None
+    if benchmark_ready(cohort, after_week):
+        return {'after_week': after_week, 'status': 'published'}
+    return {'after_week': after_week, 'status': 'pending'}
+
+
 class StudentPerformanceView(APIView):
     """Past-round performance for the requesting student's firm.
 
@@ -187,9 +221,11 @@ class StudentPerformanceView(APIView):
                 'feedback': score.feedback,
             })
         best = max((r['total'] for r in rows), default=0)
+
         return Response({
             'weeks': rows,
             'graded_count': len(rows),
             'average': round(sum(r['total'] for r in rows) / len(rows), 1) if rows else 0,
             'best': best,
+            'benchmark': _benchmark_state(run),
         })
