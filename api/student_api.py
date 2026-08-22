@@ -146,16 +146,23 @@ class MyProfileView(APIView):
 def _benchmark_state(run):
     """What a student may know about standings at a checkpoint round.
 
-    Standings are withheld until every firm in the cohort has the round graded,
-    because a firm that is merely ungraded ranks exactly like one that played
-    badly. Without saying so, a student at a checkpoint sees nothing and cannot
-    tell "not yet" from "broken" — which produces the very questions the
-    withholding was meant to prevent.
+    Two gates stand between a graded round and a student seeing the table, and
+    they answer different questions:
 
-    Deliberately says only that it is pending. No firm names, no count of who
-    is outstanding, no partial figures: which firms are behind is not a
-    student's business, and a count is a small leak that compounds across a
-    cohort that talks to each other.
+    1. `benchmark_ready` — is the table *correct*? Standings rank firms against
+       each other, so a firm that is merely ungraded ranks exactly like one that
+       played badly. An incomplete table is not provisional, it is wrong.
+    2. `revealed_at` — is this the *moment*? The reveal is a teaching device.
+       The Week 14 note asks for it after teams have read their own debriefs,
+       "so the standings land as epilogue rather than verdict".
+
+    Saying nothing at all fails the student either way: at a checkpoint they see
+    an empty screen and cannot tell "not yet" from "broken", which produces the
+    very questions the withholding was meant to prevent.
+
+    What is never disclosed is *which* firms are outstanding, or how many. Which
+    firm is behind on grading is not a student's business, and a count is a
+    small leak that compounds fast in a cohort that talks to each other.
     """
     from scoring.config import BENCHMARK_PHASE_WEEKS
     from scoring.models import Benchmark
@@ -167,13 +174,41 @@ def _benchmark_state(run):
         return None
 
     after_week = max(reached)
-    if not Benchmark.objects.filter(cohort=cohort, after_week=after_week).exists():
-        # The round has not been graded for anyone yet — nothing is pending
-        # from the student's point of view, it simply has not happened.
+    benchmark = Benchmark.objects.filter(cohort=cohort, after_week=after_week).first()
+    if benchmark is None:
+        # Not graded for anyone yet. That is not "pending", it simply has not
+        # happened, and calling it pending would be its own kind of noise.
         return None
-    if benchmark_ready(cohort, after_week):
-        return {'after_week': after_week, 'status': 'published'}
-    return {'after_week': after_week, 'status': 'pending'}
+    if not benchmark_ready(cohort, after_week):
+        return {'after_week': after_week, 'status': 'pending'}
+    if not benchmark.is_revealed:
+        return {'after_week': after_week, 'status': 'awaiting_release'}
+    return {'after_week': after_week, 'status': 'published'}
+
+
+def _student_standings(run):
+    """Every benchmark this student may read, oldest first.
+
+    All of them, not just the latest: the Week 8 discussion turns on comparing
+    against Benchmark 1, and a table a student saw once in class is useless if
+    they cannot look it up again in week nine.
+    """
+    from scoring.models import Benchmark
+    from scoring.services import benchmark_ready, student_benchmark_payload
+
+    cohort = run.team.cohort
+    rows = []
+    for benchmark in Benchmark.objects.filter(cohort=cohort).order_by('after_week'):
+        if not benchmark.is_revealed:
+            continue
+        if not benchmark_ready(cohort, benchmark.after_week):
+            # Revealed earlier, then a firm was added or re-opened. Correctness
+            # outranks the fact that it was once released.
+            continue
+        payload = student_benchmark_payload(benchmark)
+        payload['your_firm'] = run.team.name
+        rows.append(payload)
+    return rows
 
 
 class StudentPerformanceView(APIView):
@@ -228,4 +263,5 @@ class StudentPerformanceView(APIView):
             'average': round(sum(r['total'] for r in rows) / len(rows), 1) if rows else 0,
             'best': best,
             'benchmark': _benchmark_state(run),
+            'standings': _student_standings(run),
         })

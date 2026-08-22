@@ -39,7 +39,9 @@ from engine.services import (
     InvalidTransition, get_or_create_week_instance, submit_week, view_briefing,
 )
 from scoring.models import Benchmark, ScoreRecord
-from scoring.services import finalize_score, reveal_benchmark, student_benchmark_payload
+from scoring.services import (
+    benchmark_pending, finalize_score, reveal_benchmark, student_benchmark_payload,
+)
 from weeks.models import WeekInstanceStatus
 from weeks.registry import registry
 
@@ -622,8 +624,6 @@ class InstructorBenchmarksView(APIView):
     permission_classes = [IsAuthenticated, IsInstructor]
 
     def get(self, request, cohort_id):
-        from scoring.services import benchmark_pending
-
         cohort = get_object_or_404(Cohort, id=cohort_id)
         benchmarks = Benchmark.objects.filter(cohort=cohort).order_by('after_week')
         rows = []
@@ -639,12 +639,14 @@ class InstructorBenchmarksView(APIView):
                     'after_week': b.after_week,
                     'standings': [],
                     'is_revealed': b.is_revealed,
+                    'revealed_at': b.revealed_at.isoformat() if b.revealed_at else None,
                     'on_hold': True,
                     'pending_firms': pending,
                 })
                 continue
             row = student_benchmark_payload(b)
             row['is_revealed'] = b.is_revealed
+            row['revealed_at'] = b.revealed_at.isoformat() if b.revealed_at else None
             row['on_hold'] = False
             row['pending_firms'] = []
             rows.append(row)
@@ -702,12 +704,30 @@ class InstructorBenchmarkRevealView(APIView):
         if not request.user.instructed_cohorts.filter(id=cohort.id).exists():
             return Response({'detail': 'Not your cohort.'}, status=403)
         benchmark = get_object_or_404(Benchmark, cohort=cohort, after_week=after_week)
+
+        # Releasing an incomplete table would defeat the withholding entirely:
+        # the firms still ungraded would show at the bottom, in front of the
+        # whole cohort, for a reason that is not their performance.
+        pending = [t.name for t in benchmark_pending(cohort, after_week)]
+        if pending:
+            return Response(
+                {
+                    'detail': 'Grade every firm for this round before releasing standings.',
+                    'pending_firms': pending,
+                },
+                status=409,
+            )
+
         # `is_revealed` is a read-only property over `revealed_at`. Assigning to
         # it shadowed the property and then save(update_fields=['is_revealed'])
         # raised, because no such column exists — so revealing always 500'd.
         if not benchmark.is_revealed:
             reveal_benchmark(benchmark)
-        return Response({'after_week': benchmark.after_week, 'is_revealed': True})
+        return Response({
+            'after_week': benchmark.after_week,
+            'is_revealed': True,
+            'revealed_at': benchmark.revealed_at.isoformat() if benchmark.revealed_at else None,
+        })
 
 
 class AdminSimulationsView(APIView):

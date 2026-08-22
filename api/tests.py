@@ -35,8 +35,9 @@ from .instructor_api import (
 )
 from .student_api import StudentPerformanceView
 from .views import (
-    AdminFacultyView, AdminSimulationsView, GroupConversationView, InstructorFeedbackDraftView,
-    InstructorQueueView, InstructorScoreView, RunView, resolve_run, run_for_user,
+    AdminFacultyView, AdminSimulationsView, GroupConversationView, InstructorBenchmarkRevealView,
+    InstructorFeedbackDraftView, InstructorQueueView, InstructorScoreView, RunView,
+    resolve_run, run_for_user,
 )
 
 
@@ -1077,19 +1078,151 @@ class StudentBenchmarkStateTests(TestCase):
         state = self._performance(student)['benchmark']
         self.assertEqual(state, {'after_week': 4, 'status': 'pending'})
 
-        # Nothing about who, how many, or how they are doing.
-        blob = str(self._performance(student)).lower()
-        for leak in ('team 2', 'team 1', 'pending_firms', 'standings', 'rank'):
+        # The standings list is present but empty; nothing may name who is
+        # outstanding, how many there are, or how anyone is placed.
+        data = self._performance(student)
+        self.assertEqual(data['standings'], [])
+        blob = str(data['benchmark']).lower()
+        for leak in ('team 1', 'team 2', 'pending_firms', 'rank'):
             self.assertNotIn(leak, blob, f'student payload leaked {leak!r}')
 
-    def test_it_flips_to_published_when_the_last_firm_is_graded(self):
+    def test_a_fully_graded_round_awaits_the_instructors_release(self):
+        """Grading everyone makes the table *correct*, not *published*. The
+        reveal is a teaching moment the instructor times."""
         records = [self._play_to_week_4(run, s) for run, s in self.firms]
         for record in records:
             finalize_score(record)
 
         run, student = self.firms[0]
         run.refresh_from_db()
-        self.assertEqual(
-            self._performance(student)['benchmark'],
-            {'after_week': 4, 'status': 'published'},
+        data = self._performance(student)
+        self.assertEqual(data['benchmark'], {'after_week': 4, 'status': 'awaiting_release'})
+        self.assertEqual(data['standings'], [])
+
+
+class StudentStandingsVisibilityTests(TestCase):
+    """The two gates between a graded round and a student seeing the table.
+
+    Correctness first (every firm graded), then timing (the instructor's
+    release). Both must hold; neither alone is enough.
+    """
+
+    def setUp(self):
+        self.instructor = User.objects.create_user(
+            username='stand-teacher@example.com', password='pw', role=UserRole.INSTRUCTOR,
         )
+        self.cohort = Cohort.objects.create(name='SIM-STAND', tier=Tier.UNDERGRAD)
+        self.cohort.instructors.add(self.instructor)
+        self.firms = []
+        for n in (1, 2):
+            team = Team.objects.create(cohort=self.cohort, name=f'Team {n}')
+            student = User.objects.create_user(
+                username=f'stand-{n}@example.com', password='pw', role=UserRole.STUDENT,
+            )
+            team.members.add(student)
+            Enrollment.objects.create(cohort=self.cohort, student=student, team=team)
+            self.firms.append((Run.objects.create(team=team), student))
+
+    def _play_to_week_4(self, run, student):
+        from weeks.tests import week2_payload, week3_payload, week4_payload
+        payloads = {1: week1_payload, 2: week2_payload, 3: week3_payload, 4: week4_payload}
+        for week in range(1, 5):
+            run.refresh_from_db()
+            run.current_week = week
+            run.save()
+            instance = view_briefing(run)
+            submit_week(
+                instance,
+                structured_payload=payloads[week](),
+                deliverable_text='A considered memo with a clear plan.',
+                submitted_by=student,
+            )
+            instance.refresh_from_db()
+            if week < 4:
+                finalize_score(instance.score_record)
+        return instance.score_record
+
+    def _performance(self, student):
+        request = APIRequestFactory().get(f'/api/student/performance/?cohort={self.cohort.id}')
+        force_authenticate(request, user=student)
+        return StudentPerformanceView.as_view()(request).data
+
+    def _release(self, after_week=4):
+        request = APIRequestFactory().post(
+            f'/api/instructor/benchmarks/{self.cohort.id}/reveal/{after_week}/'
+        )
+        force_authenticate(request, user=self.instructor)
+        return InstructorBenchmarkRevealView.as_view()(
+            request, cohort_id=self.cohort.id, after_week=after_week
+        )
+
+    def _grade_all(self):
+        for record in [self._play_to_week_4(run, s) for run, s in self.firms]:
+            finalize_score(record)
+
+    def test_an_incomplete_round_cannot_be_released(self):
+        records = [self._play_to_week_4(run, s) for run, s in self.firms]
+        finalize_score(records[0])
+
+        resp = self._release()
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp.data['pending_firms'], ['Team 2'])
+
+        run, student = self.firms[0]
+        run.refresh_from_db()
+        data = self._performance(student)
+        self.assertEqual(data['benchmark']['status'], 'pending')
+        self.assertEqual(data['standings'], [])
+
+    def test_graded_but_unreleased_is_withheld_and_says_so(self):
+        self._grade_all()
+        run, student = self.firms[0]
+        run.refresh_from_db()
+
+        data = self._performance(student)
+        self.assertEqual(data['benchmark']['status'], 'awaiting_release')
+        self.assertEqual(data['standings'], [], 'standings leaked before the instructor released them')
+
+    def test_release_publishes_the_table_to_students(self):
+        self._grade_all()
+        self.assertEqual(self._release().status_code, 200)
+
+        run, student = self.firms[0]
+        run.refresh_from_db()
+        data = self._performance(student)
+
+        self.assertEqual(data['benchmark']['status'], 'published')
+        self.assertEqual(len(data['standings']), 1)
+        table = data['standings'][0]
+        self.assertEqual(table['after_week'], 4)
+        self.assertEqual(len(table['standings']), 2)
+        self.assertEqual(table['your_firm'], 'Team 1')
+
+    def test_released_standings_carry_no_hidden_state(self):
+        self._grade_all()
+        self._release()
+        run, student = self.firms[0]
+        run.refresh_from_db()
+
+        blob = str(self._performance(student)['standings']).lower()
+        for leak in ('trap', 'gate_factor', 'drift_penalty', 'trust_points', 'auto_components'):
+            self.assertNotIn(leak, blob, f'standings leaked {leak!r}')
+
+    def test_a_released_table_is_pulled_again_if_it_stops_being_complete(self):
+        """Correctness outranks the fact that it was once released — a firm
+        added after the reveal makes the published ranking wrong."""
+        self._grade_all()
+        self._release()
+
+        late = Team.objects.create(cohort=self.cohort, name='Team 3')
+        latecomer = User.objects.create_user(
+            username='stand-late@example.com', password='pw', role=UserRole.STUDENT,
+        )
+        late.members.add(latecomer)
+        Run.objects.create(team=late)
+
+        run, student = self.firms[0]
+        run.refresh_from_db()
+        data = self._performance(student)
+        self.assertEqual(data['standings'], [])
+        self.assertEqual(data['benchmark']['status'], 'pending')
