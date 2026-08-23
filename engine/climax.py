@@ -18,7 +18,20 @@ DRIFT_WEIGHTS = {
 }
 
 
-def arc_coherence(drift_events, anchor_strength):
+# Holding is deliberately quieter than breaking: one point where the equivalent
+# drift costs two. Over fourteen rounds a firm that keeps its line accumulates a
+# real advantage without any single week feeling decisive.
+HOLD_WEIGHT = 1
+
+
+def arc_coherence(drift_events, anchor_strength, hold_events=()):
+    """Where the firm ended up on its own stated direction.
+
+    Anchor grade, plus every round it held the line, minus every round it drifted.
+    The additive term is the point: subtract-only meant a firm that took the
+    worse-looking option because the better-looking one contradicted its own
+    commitment scored the same as a firm that never faced the choice.
+    """
     base = {
         'strong': 8,
         'adequate': 5,
@@ -26,7 +39,8 @@ def arc_coherence(drift_events, anchor_strength):
         None: 0,
     }.get(anchor_strength, 0)
     drift = sum(DRIFT_WEIGHTS.get(event.get('weight', 'medium'), 2) for event in drift_events)
-    score = base - drift
+    hold = HOLD_WEIGHT * len(hold_events or ())
+    score = base + hold - drift
     if score >= 5:
         return 'strong'
     if score >= 2:

@@ -165,7 +165,7 @@ class Week7Module(WeekModule):
                 label='Board communication posture',
                 choices=[
                     {'value': 'transparent_ownership', 'label': 'Transparent ownership'},
-                    {'value': 'spin', 'label': 'Spin'},
+                    {'value': 'spin', 'label': 'Lead with the recovery plan'},
                 ],
                 trap_choices=['spin'],
             ),

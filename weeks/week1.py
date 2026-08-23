@@ -240,7 +240,7 @@ class Week1Module(WeekModule):
                 choices=[
                     {'value': 'ot_visibility_assessment', 'label': 'OT visibility assessment'},
                     {'value': 'other_credibility_move', 'label': 'Other credibility move'},
-                    {'value': 'premature_bold_move', 'label': 'Premature bold move'},
+                    {'value': 'premature_bold_move', 'label': 'Announce a major initiative'},
                     {'value': 'diagnose_only', 'label': 'Diagnose only'},
                 ],
                 trap_choices=['premature_bold_move'],

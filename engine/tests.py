@@ -108,3 +108,39 @@ class EngineDerivationTests(TestCase):
         self.assertEqual(resolve_endgame(state), TierOutcome.SQUEAK_THROUGH)
 
 # Create your tests here.
+
+
+class ArcCoherenceRewardsHoldingTests(TestCase):
+    """The arc must distinguish a firm that held its line from one that was
+    never tested. Before this it could not: it started at the week-1 anchor
+    grade and only ever subtracted, so avoiding every penalised option scored
+    identically to taking the worse-looking road on purpose.
+    """
+
+    def test_holding_beats_never_being_tested(self):
+        # A weak anchor is where the difference shows: an adequate one already
+        # sits on the 'strong' threshold with no events at all.
+        untested = arc_coherence([], 'weak', [])
+        held = arc_coherence([], 'weak', [{'week': w} for w in (2, 4, 6)])
+        self.assertEqual(untested, 'adequate')
+        self.assertEqual(held, 'strong', 'holding the line earned nothing')
+
+    def test_holding_is_quieter_than_breaking(self):
+        """One hold must not cancel one drift — breaking is the louder signal."""
+        one_drift = arc_coherence([{'week': 2}], 'adequate', [{'week': 3}])
+        clean = arc_coherence([], 'adequate', [])
+        self.assertNotEqual(one_drift, clean)
+        # 5 - 2 + 1 = 4 -> adequate; two holds are needed to undo one drift.
+        self.assertEqual(one_drift, 'adequate')
+        self.assertEqual(arc_coherence([{'week': 2}], 'adequate', [{'week': 3}, {'week': 4}]), 'strong')
+
+    def test_drift_still_dominates_a_run_that_zigzagged(self):
+        # Four drifts at two apiece outweigh a strong anchor and a single hold.
+        drifts = [{'week': w} for w in (2, 3, 4, 5)]
+        holds = [{'week': 6}]
+        self.assertEqual(arc_coherence(drifts, 'strong', holds), 'weak')
+
+    def test_a_run_predating_hold_events_still_scores(self):
+        """Runs created before the ledger existed pass no hold list at all."""
+        self.assertEqual(arc_coherence([], 'strong'), 'strong')
+        self.assertEqual(arc_coherence([{'week': 2}, {'week': 3}], 'strong'), 'adequate')

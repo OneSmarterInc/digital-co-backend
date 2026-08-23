@@ -82,11 +82,16 @@ WEEK5_TRAP_PENALTY = 2
 WEEK5_DISRUPTION_READ_BONUS = 3
 WEEK5_CONVICTION_BONUS = 2
 WEEK5_DRIFT_PENALTY = 2
+# Holding the line is worth half what breaking it costs. Deliberate: a firm
+# should accumulate an advantage over fourteen rounds without any single week
+# turning on it.
+WEEK5_HOLD_BONUS = 1
 WEEK6_TRAP_PENALTY = 2
 WEEK6_OVER_CAUTION_PENALTY = 1
 WEEK6_SOBER_READ_BONUS = 3
 WEEK6_DATA_RIGHTS_HANDLED_BONUS = 2
 WEEK6_DRIFT_PENALTY = 2
+WEEK6_HOLD_BONUS = 1
 WEEK6_CHANNEL_ALARM = 2
 WEEK7_TRAP_PENALTY = 2
 WEEK7_PARTIAL_PENALTY = 1

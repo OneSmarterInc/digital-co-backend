@@ -2546,3 +2546,64 @@ class RegradingIsIdempotentTests(TestCase):
         finalize_score(record, instructor_scores={'coherence': 1})
         record.refresh_from_db()
         self.assertIn('What held', record.feedback)   # not wiped by a re-grade
+
+
+class HoldEventsAccumulateTests(TestCase):
+    """A round scored positive on coherence is recorded as a hold, so the Week
+    13 arc can credit it. Recorded centrally in submit_week rather than in each
+    week module, because the rule is uniform."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='hold-student', password='pw')
+        cohort = Cohort.objects.create(name='SIM-HOLD', tier=Tier.UNDERGRAD)
+        team = Team.objects.create(cohort=cohort, name='Team A')
+        team.members.add(self.user)
+        self.run = Run.objects.create(team=team)
+
+    def _play(self, week, payload):
+        self.run.refresh_from_db()
+        self.run.current_week = week
+        self.run.save()
+        instance = view_briefing(self.run)
+        submit_week(
+            instance,
+            structured_payload=payload,
+            deliverable_text='A considered memo with a clear plan.',
+            submitted_by=self.user,
+        )
+        instance.refresh_from_db()
+        self.run.refresh_from_db()
+        return instance
+
+    def _holds(self):
+        return self.run.state['through_lines']['coherence'].get('hold_events', [])
+
+    def test_a_round_that_holds_the_line_is_recorded(self):
+        self._play(1, week1_payload())
+        self.run.state['through_lines']['coherence']['anchor_strength'] = 'strong'
+        self.run.save()
+        instance = self._play(2, week2_payload())
+        # Week 2 extends the week-1 data-services direction: positive coherence.
+        self.assertGreater(instance.score_record.auto_components['scores']['coherence'], 0)
+        self.assertEqual([h['week'] for h in self._holds()], [2])
+
+    def test_a_round_that_drifts_records_no_hold(self):
+        self._play(1, week1_payload())
+        self.run.state['through_lines']['coherence']['anchor_strength'] = 'strong'
+        self.run.save()
+        instance = self._play(2, week2_payload({'alignment_choice': 'stabilize'}))
+        self.assertLess(instance.score_record.auto_components['scores']['coherence'], 0)
+        self.assertEqual(self._holds(), [])
+        self.assertTrue(self.run.state['through_lines']['coherence']['drift_events'])
+
+    def test_a_round_that_does_not_engage_the_axis_records_nothing(self):
+        """Week 3's options are defensible under either anchor, so it should
+        neither reward nor penalise — the case the audit raised."""
+        self._play(1, week1_payload())
+        self.run.state['through_lines']['coherence']['anchor_strength'] = 'strong'
+        self.run.save()
+        self._play(2, week2_payload())
+        before = len(self._holds())
+        instance = self._play(3, week3_payload({'migration_fate': 'descope'}))
+        self.assertEqual(instance.score_record.auto_components['scores']['coherence'], 0)
+        self.assertEqual(len(self._holds()), before, 'week 3 credited a hold it should not')

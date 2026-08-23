@@ -145,7 +145,7 @@ class Week12Module(WeekModule):
                 choices=[
                     {'value': 'edge_and_repatriate', 'label': 'Edge and repatriate'},
                     {'value': 'centralize', 'label': 'Centralize'},
-                    {'value': 'minimal_change', 'label': 'Minimal change'},
+                    {'value': 'minimal_change', 'label': 'Hold the current architecture'},
                 ],
                 trap_choices=['centralize', 'minimal_change'],
             ),

@@ -169,4 +169,9 @@ def score_record_json(score):
         # instructor reads the same page the firm did.
         'preamble': instance.preamble,
         'preamble_problem': instance.preamble_problem,
+        # The engine's read of the written deliverable, with its reasoning.
+        # Surfaced so the proposal can be judged against the grader's own view
+        # before it is trusted — and so a failed call reads as "not assessed"
+        # rather than as a considered zero.
+        'quality_proposal': score.auto_components.get('deliverable_quality_proposal') or {},
     }

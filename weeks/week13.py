@@ -117,9 +117,9 @@ class Week13Module(WeekModule):
                 key='narrative_coherence',
                 label='Narrative coherence',
                 choices=[
-                    {'value': 'coherent', 'label': 'Coherent'},
-                    {'value': 'partial', 'label': 'Partial'},
-                    {'value': 'contradictory', 'label': 'Contradictory'},
+                    {'value': 'coherent', 'label': 'Present the arc as one continuous strategy'},
+                    {'value': 'partial', 'label': 'Present the strongest threads'},
+                    {'value': 'contradictory', 'label': 'Present each decision on its own merits'},
                 ],
                 trap_choices=['contradictory'],
             ),
@@ -127,8 +127,8 @@ class Week13Module(WeekModule):
                 key='business_case',
                 label='Business case',
                 choices=[
-                    {'value': 'board_language', 'label': 'Board language'},
-                    {'value': 'technical_jargon', 'label': 'Technical jargon'},
+                    {'value': 'board_language', 'label': 'Lead with risk and return'},
+                    {'value': 'technical_jargon', 'label': 'Lead with the technical detail'},
                 ],
                 trap_choices=['technical_jargon'],
             ),
@@ -136,9 +136,9 @@ class Week13Module(WeekModule):
                 key='ask_sizing',
                 label='Ask sizing',
                 choices=[
-                    {'value': 'well_sized', 'label': 'Well sized'},
-                    {'value': 'too_big', 'label': 'Too big'},
-                    {'value': 'too_small', 'label': 'Too small'},
+                    {'value': 'well_sized', 'label': 'Ask for the next phase'},
+                    {'value': 'too_big', 'label': 'Ask for the full programme'},
+                    {'value': 'too_small', 'label': 'Ask for a first tranche only'},
                 ],
                 trap_choices=['too_big', 'too_small'],
             ),
@@ -146,8 +146,8 @@ class Week13Module(WeekModule):
                 key='hostile_question_handled',
                 label='Hostile question handled',
                 choices=[
-                    {'value': 'defended', 'label': 'Defended'},
-                    {'value': 'folded', 'label': 'Folded'},
+                    {'value': 'defended', 'label': 'Hold the position and answer directly'},
+                    {'value': 'folded', 'label': 'Acknowledge the concern and qualify'},
                 ],
                 trap_choices=['folded'],
             ),
@@ -225,7 +225,9 @@ class Week13Module(WeekModule):
 
 
 def _arc(state: dict):
+    coherence = state['through_lines']['coherence']
     return arc_coherence(
-        state['through_lines']['coherence'].get('drift_events', []),
-        state['through_lines']['coherence'].get('anchor_strength'),
+        coherence.get('drift_events', []),
+        coherence.get('anchor_strength'),
+        coherence.get('hold_events', []),
     )

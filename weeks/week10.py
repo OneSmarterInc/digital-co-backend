@@ -131,9 +131,9 @@ class Week10Module(WeekModule):
                 key='containment',
                 label='Containment',
                 choices=[
-                    {'value': 'contained', 'label': 'Contained'},
-                    {'value': 'partial', 'label': 'Partial'},
-                    {'value': 'overwhelmed', 'label': 'Overwhelmed'},
+                    {'value': 'contained', 'label': 'Full containment now'},
+                    {'value': 'partial', 'label': 'Contain the critical path first'},
+                    {'value': 'overwhelmed', 'label': 'Sequential triage as capacity allows'},
                 ],
             ),
             DecisionField(
@@ -141,7 +141,7 @@ class Week10Module(WeekModule):
                 label='Disclosure',
                 choices=[
                     {'value': 'transparent', 'label': 'Transparent'},
-                    {'value': 'spin_or_hide', 'label': 'Spin or hide'},
+                    {'value': 'spin_or_hide', 'label': 'Disclose only what is required'},
                 ],
                 trap_choices=['spin_or_hide'],
             ),

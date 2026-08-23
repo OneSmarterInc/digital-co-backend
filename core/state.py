@@ -78,6 +78,12 @@ def default_run_state():
                 'anchor_set': False,
                 'anchor_strength': None,
                 'drift_events': [],
+                # Holding a line was previously invisible: the arc subtracted
+                # drift from the week-1 anchor grade and had no additive term,
+                # so a firm that held under pressure finished identical to one
+                # that was never tested. Read with .get() everywhere — runs
+                # created before this key exists must keep working.
+                'hold_events': [],
             },
         },
         'relationships': {key: 0 for key in RELATIONSHIP_KEYS},

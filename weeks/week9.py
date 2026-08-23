@@ -162,7 +162,7 @@ class Week9Module(WeekModule):
                 choices=[
                     {'value': 'predictive_maintenance_core', 'label': 'Predictive maintenance core'},
                     {'value': 'narrow_real', 'label': 'Narrow real use cases'},
-                    {'value': 'theater_scatter', 'label': 'Theater scatter'},
+                    {'value': 'theater_scatter', 'label': 'Broad pilot portfolio'},
                 ],
                 trap_choices=['theater_scatter'],
             ),

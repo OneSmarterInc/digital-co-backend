@@ -6,6 +6,7 @@ from engine.derivations import derive_wk1_direction
 from scoring.config import (
     WEEK5_CONVICTION_BONUS,
     WEEK5_DRIFT_PENALTY,
+    WEEK5_HOLD_BONUS,
     WEEK5_DISRUPTION_READ_BONUS,
     WEEK5_TRAP_PENALTY,
 )
@@ -210,9 +211,15 @@ class Week5Module(WeekModule):
             flags.append('herd_chase')
             ec -= WEEK5_TRAP_PENALTY
 
-        if derive_wk1_direction(run_state) == 'data_services' and (portfolio['autonomy'] == 'bet' or p['meridian_response'] == 'chase'):
+        wk1_direction = derive_wk1_direction(run_state)
+        if wk1_direction == 'data_services' and (portfolio['autonomy'] == 'bet' or p['meridian_response'] == 'chase'):
             coh -= WEEK5_DRIFT_PENALTY
             flags.append('herd_pivot')
+        elif wk1_direction == 'data_services' and p['meridian_response'] == 'strategic_conviction':
+            # The same axis, held: the rival's announcement did not move them off
+            # the direction they set in week 1. Exactly the case the penalty
+            # above detects, with the sign inverted.
+            coh += WEEK5_HOLD_BONUS
 
         return AutoScore(
             scores={'strategic_judgment': sj, 'execution_consequence': ec, 'coherence': coh},

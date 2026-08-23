@@ -195,8 +195,8 @@ class Week3Module(WeekModule):
                 label='Communication posture',
                 choices=[
                     {'value': 'transparent_ownership', 'label': 'Transparent ownership'},
-                    {'value': 'blame_shift', 'label': 'Blame shift'},
-                    {'value': 'spin', 'label': 'Spin'},
+                    {'value': 'blame_shift', 'label': 'Attribute the failure to the integrator'},
+                    {'value': 'spin', 'label': 'Lead with the recovery plan'},
                 ],
                 trap_choices=['blame_shift', 'spin'],
             ),

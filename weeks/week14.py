@@ -112,8 +112,8 @@ class Week14Module(WeekModule):
                 key='integration',
                 label='Integration',
                 choices=[
-                    {'value': 'genuine', 'label': 'Genuine'},
-                    {'value': 'papered_over', 'label': 'Papered over'},
+                    {'value': 'genuine', 'label': 'Trace the arc as it happened'},
+                    {'value': 'papered_over', 'label': 'Present a unified narrative'},
                 ],
                 trap_choices=['papered_over'],
             ),
@@ -121,8 +121,8 @@ class Week14Module(WeekModule):
                 key='consequence_reckoning',
                 label='Consequence reckoning',
                 choices=[
-                    {'value': 'honest', 'label': 'Honest'},
-                    {'value': 'victory_narrative', 'label': 'Victory narrative'},
+                    {'value': 'honest', 'label': 'Name what went wrong'},
+                    {'value': 'victory_narrative', 'label': 'Lead with what worked'},
                 ],
                 trap_choices=['victory_narrative'],
             ),
@@ -130,8 +130,8 @@ class Week14Module(WeekModule):
                 key='forward_strategy',
                 label='Forward strategy',
                 choices=[
-                    {'value': 'grounded_in_real_position', 'label': 'Grounded in real position'},
-                    {'value': 'describes_unbuilt_company', 'label': 'Describes unbuilt company'},
+                    {'value': 'grounded_in_real_position', 'label': 'Build from where you actually are'},
+                    {'value': 'describes_unbuilt_company', 'label': 'Set out the intended future state'},
                 ],
                 trap_choices=['describes_unbuilt_company'],
             ),

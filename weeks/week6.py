@@ -2,11 +2,12 @@ from copy import deepcopy
 
 from core.models import Tier
 from core.state import validate_run_state
-from engine.derivations import wk4_differentiator
+from engine.derivations import derive_wk1_direction, wk4_differentiator
 from scoring.config import (
     WEEK6_CHANNEL_ALARM,
     WEEK6_DATA_RIGHTS_HANDLED_BONUS,
     WEEK6_DRIFT_PENALTY,
+    WEEK6_HOLD_BONUS,
     WEEK6_OVER_CAUTION_PENALTY,
     WEEK6_SOBER_READ_BONUS,
     WEEK6_TRAP_PENALTY,
@@ -202,6 +203,13 @@ class Week6Module(WeekModule):
             if wk4_differentiator(run_state) == 'rent':
                 flags.append('platform_on_sand')
                 coh -= WEEK6_DRIFT_PENALTY
+        elif (
+            derive_wk1_direction(run_state) == 'data_services'
+            and p.get('platform_decision') == 'connected_services'
+        ):
+            # Services on their own machine data is the week-1 direction carried
+            # forward, rather than the platform the room is asking for.
+            coh += WEEK6_HOLD_BONUS
 
         return AutoScore(
             scores={'strategic_judgment': sj, 'execution_consequence': ec, 'coherence': coh},
