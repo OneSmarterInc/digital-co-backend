@@ -3,7 +3,8 @@ from django.test import TestCase
 from core.models import TierOutcome
 from core.state import default_run_state
 
-from .climax import arc_coherence, board_receptiveness, resolve_endgame
+from core.state import default_run_state
+from .climax import arc_coherence, board_receptiveness, resolve_endgame, trace_coherence
 from .derivations import (
     breach_severity,
     contradicts,
@@ -144,3 +145,42 @@ class ArcCoherenceRewardsHoldingTests(TestCase):
         """Runs created before the ledger existed pass no hold list at all."""
         self.assertEqual(arc_coherence([], 'strong'), 'strong')
         self.assertEqual(arc_coherence([{'week': 2}, {'week': 3}], 'strong'), 'adequate')
+
+
+class TraceCoherencePassesHoldsTests(TestCase):
+    """`arc_coherence` takes hold_events with a default, so a call site that
+    forgets it produces the old subtract-only arc and raises nothing. These test
+    through trace_coherence rather than arc_coherence directly — testing the
+    function only ever proved the arithmetic, never that anyone fed it.
+    """
+
+    def _state(self, *, drifts=0, holds=0, anchor='weak'):
+        state = default_run_state()
+        coherence = state['through_lines']['coherence']
+        coherence['anchor_strength'] = anchor
+        coherence['drift_events'] = [{'week': w} for w in range(2, 2 + drifts)]
+        coherence['hold_events'] = [{'week': w, 'weight': 'hold'} for w in range(2, 2 + holds)]
+        return state
+
+    def test_holding_scores_above_an_otherwise_identical_run(self):
+        held = trace_coherence(self._state(holds=3))
+        untested = trace_coherence(self._state(holds=0))
+        self.assertEqual(untested['settled'], 'adequate')
+        self.assertEqual(held['settled'], 'strong', 'holds were not passed through')
+
+    def test_the_trace_carries_the_holds_it_counted(self):
+        trace = trace_coherence(self._state(holds=2, drifts=1))
+        self.assertEqual(len(trace['hold_events']), 2)
+        self.assertEqual(len(trace['drift_events']), 1)
+
+    def test_a_settled_flag_still_wins_over_recomputation(self):
+        state = self._state(holds=3)
+        state['flags']['arc_coherence_settled'] = 'weak'
+        self.assertEqual(trace_coherence(state)['settled'], 'weak')
+
+    def test_a_run_predating_the_hold_ledger_still_traces(self):
+        state = self._state(drifts=1, anchor='strong')
+        del state['through_lines']['coherence']['hold_events']
+        trace = trace_coherence(state)
+        self.assertEqual(trace['settled'], 'strong')
+        self.assertEqual(trace['hold_events'], [])

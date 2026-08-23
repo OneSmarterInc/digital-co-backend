@@ -1226,3 +1226,99 @@ class StudentStandingsVisibilityTests(TestCase):
         data = self._performance(student)
         self.assertEqual(data['standings'], [])
         self.assertEqual(data['benchmark']['status'], 'pending')
+
+
+class ReviseGradeOverTheWireTests(TestCase):
+    """The path the Revise button actually takes.
+
+    finalize_score is covered directly, but the endpoint the modal posts to was
+    not — and this is the same shape as the original double-count, where the
+    service was right and the caller made it wrong.
+    """
+
+    def setUp(self):
+        self.instructor = User.objects.create_user(
+            username='revise-teacher@example.com', password='pw', role=UserRole.INSTRUCTOR,
+        )
+        self.student = User.objects.create_user(
+            username='revise-student@example.com', password='pw', role=UserRole.STUDENT,
+        )
+        cohort = Cohort.objects.create(name='SIM-REVISE', tier=Tier.UNDERGRAD)
+        cohort.instructors.add(self.instructor)
+        team = Team.objects.create(cohort=cohort, name='Team 1')
+        team.members.add(self.student)
+        self.run = Run.objects.create(team=team)
+
+        instance = view_briefing(self.run)
+        submit_week(
+            instance,
+            structured_payload=week1_payload(),
+            deliverable_text='A rigorous current-state memo with a 30-60-90 plan.',
+            submitted_by=self.student,
+        )
+        instance.refresh_from_db()
+        self.record = instance.score_record
+
+    def _post(self, body):
+        request = APIRequestFactory().post(
+            f'/api/instructor/score/{self.record.id}/', body, format='json',
+        )
+        force_authenticate(request, user=self.instructor)
+        return InstructorScoreView.as_view()(request, score_id=self.record.id)
+
+    def _accumulated(self):
+        self.run.refresh_from_db()
+        return dict(self.run.state['accumulated_scores'])
+
+    def test_revising_replaces_the_recorded_grade_rather_than_adding_to_it(self):
+        auto = dict(self.record.auto_components['scores'])
+
+        self._post({
+            'scores': {d: 0 for d in SCORE_DIMENSIONS}, 'anchor_strength': 'adequate',
+        })
+        first = self._accumulated()
+        self.record.refresh_from_db()
+        for dimension in SCORE_DIMENSIONS:
+            self.assertEqual(getattr(self.record, dimension), auto.get(dimension, 0))
+
+        # The instructor reopens it and adds two to strategic judgment.
+        self._post({
+            'scores': {**{d: 0 for d in SCORE_DIMENSIONS}, 'strategic_judgment': 2},
+            'anchor_strength': 'adequate',
+        })
+        self.record.refresh_from_db()
+        second = self._accumulated()
+
+        expected = auto.get('strategic_judgment', 0) + 2
+        self.assertEqual(self.record.strategic_judgment, expected)
+        self.assertEqual(
+            second['strategic_judgment'], first['strategic_judgment'] + 2,
+            'the running total accumulated the whole grade again instead of the change',
+        )
+        for dimension in SCORE_DIMENSIONS:
+            if dimension != 'strategic_judgment':
+                self.assertEqual(second[dimension], first[dimension], dimension)
+
+    def test_revising_downwards_also_replaces(self):
+        self._post({
+            'scores': {**{d: 0 for d in SCORE_DIMENSIONS}, 'strategic_judgment': 5},
+            'anchor_strength': 'adequate',
+        })
+        high = self._accumulated()
+        self._post({
+            'scores': {**{d: 0 for d in SCORE_DIMENSIONS}, 'strategic_judgment': -1},
+            'anchor_strength': 'adequate',
+        })
+        low = self._accumulated()
+        self.assertEqual(low['strategic_judgment'], high['strategic_judgment'] - 6)
+
+    def test_three_revisions_do_not_compound(self):
+        auto = self.record.auto_components['scores'].get('strategic_judgment', 0)
+        for _ in range(3):
+            self._post({
+                'scores': {**{d: 0 for d in SCORE_DIMENSIONS}, 'strategic_judgment': 1},
+                'anchor_strength': 'adequate',
+            })
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.strategic_judgment, auto + 1)
+        self.assertEqual(self._accumulated()['strategic_judgment'], auto + 1)

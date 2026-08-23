@@ -151,9 +151,21 @@ def trace_coherence(state: dict):
     return {
         'anchor': state.get('coherence_anchor', ''),
         'anchor_strength': coherence.get('anchor_strength'),
+        # hold_events must be passed explicitly. The parameter defaults to empty,
+        # so omitting it silently reproduced the old subtract-only arc: holds were
+        # recorded in state, the arithmetic was right, and nothing handed it the
+        # data. A default that quietly restores the previous behaviour is the
+        # hardest kind of bug to see, so both call sites now pass all three.
         'settled': state.get('flags', {}).get('arc_coherence_settled')
-        or arc_coherence(coherence.get('drift_events', []), coherence.get('anchor_strength')),
+        or arc_coherence(
+            coherence.get('drift_events', []),
+            coherence.get('anchor_strength'),
+            coherence.get('hold_events', []),
+        ),
         'drift_events': list(coherence.get('drift_events', [])),
+        # Carried alongside drift so the debrief can say where a firm held its
+        # line, not only where it broke.
+        'hold_events': list(coherence.get('hold_events', [])),
         'decision_weeks': _decision_weeks(state),
     }
 
