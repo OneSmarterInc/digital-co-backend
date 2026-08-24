@@ -24,11 +24,12 @@ class Command(BaseCommand):
         # Create/Update Admin
         admin_user, admin_created = User.objects.get_or_create(
             username=opts["admin_username"],
-            defaults={"role": UserRole.ADMIN, "is_staff": True, "is_superuser": True},
+            defaults={"role": UserRole.ADMIN, "is_staff": True, "is_superuser": True, "is_active": True},
         )
         admin_user.role = UserRole.ADMIN
         admin_user.is_staff = True
         admin_user.is_superuser = True
+        admin_user.is_active = True
         admin_user.email = opts["admin_email"]
         admin_user.set_password(opts["admin_password"])
         admin_user.save()
@@ -41,9 +42,10 @@ class Command(BaseCommand):
         # Create/Update Instructor
         instructor_user, instructor_created = User.objects.get_or_create(
             username=opts["instructor_username"],
-            defaults={"role": UserRole.INSTRUCTOR},
+            defaults={"role": UserRole.INSTRUCTOR, "is_active": True},
         )
         instructor_user.role = UserRole.INSTRUCTOR
+        instructor_user.is_active = True
         instructor_user.email = opts["instructor_email"]
         instructor_user.set_password(opts["instructor_password"])
         instructor_user.save()
