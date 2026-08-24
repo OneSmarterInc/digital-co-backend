@@ -99,6 +99,13 @@ DATABASES = {
 # Password validation
 # https://docs.djangoproject.com/en/5.1/ref/settings/#auth-password-validators
 
+# Sign-in accepts a username or an email address. Students' usernames are
+# already their email; staff usernames are not, and typing the address failed in
+# a way that looked like a wrong password.
+AUTHENTICATION_BACKENDS = [
+    'core.auth_backends.UsernameOrEmailBackend',
+]
+
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',

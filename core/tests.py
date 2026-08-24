@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
+from .models import User
 from .state import advance_gate, append_decision, default_run_state, validate_run_state
 
 
@@ -65,3 +66,72 @@ class RunStateTests(TestCase):
         self.assertTrue(validate_run_state(state))
 
 # Create your tests here.
+
+
+class UsernameOrEmailLoginTests(TestCase):
+    """Either identifier signs you in, and the ambiguous cases are decided
+    rather than guessed."""
+
+    def setUp(self):
+        from core.models import UserRole
+        self.password = 'a-long-enough-test-password'
+        self.staff = User.objects.create_user(
+            username='vikram-test', email='Vikram@Example.com',
+            password=self.password, role=UserRole.ADMIN,
+        )
+
+    def _auth(self, identifier, password=None):
+        from django.contrib.auth import authenticate
+        return authenticate(username=identifier, password=password or self.password)
+
+    def test_username_still_works(self):
+        self.assertEqual(self._auth('vikram-test'), self.staff)
+
+    def test_email_now_works(self):
+        self.assertEqual(self._auth('Vikram@Example.com'), self.staff)
+
+    def test_email_is_case_insensitive(self):
+        self.assertEqual(self._auth('vikram@example.com'), self.staff)
+        self.assertEqual(self._auth('VIKRAM@EXAMPLE.COM'), self.staff)
+
+    def test_a_wrong_password_still_fails_on_either_identifier(self):
+        self.assertIsNone(self._auth('vikram-test', 'wrong-password'))
+        self.assertIsNone(self._auth('vikram@example.com', 'wrong-password'))
+
+    def test_an_inactive_account_cannot_sign_in_by_email(self):
+        self.staff.is_active = False
+        self.staff.save(update_fields=['is_active'])
+        self.assertIsNone(self._auth('vikram@example.com'))
+        self.assertIsNone(self._auth('vikram-test'))
+
+    def test_a_username_beats_someone_elses_email(self):
+        """If one person's email is another's username, the username owner keeps
+        their login — otherwise adding this feature would silently move an
+        existing account's sign-in to a different person."""
+        from core.models import UserRole
+        other = User.objects.create_user(
+            username='shared@example.com', password=self.password, role=UserRole.STUDENT,
+        )
+        self.staff.email = 'shared@example.com'
+        self.staff.save(update_fields=['email'])
+        self.assertEqual(self._auth('shared@example.com'), other)
+
+    def test_an_address_on_two_accounts_signs_in_neither(self):
+        """Email is not unique in this schema. Picking one would be a guess
+        about who is at the keyboard."""
+        from core.models import UserRole
+        User.objects.create_user(
+            username='twin', email='Vikram@Example.com',
+            password=self.password, role=UserRole.STUDENT,
+        )
+        self.assertIsNone(self._auth('vikram@example.com'))
+        # Each can still sign in by their own username.
+        self.assertEqual(self._auth('vikram-test'), self.staff)
+
+    def test_a_student_whose_username_is_their_email_is_unaffected(self):
+        from core.models import UserRole
+        student = User.objects.create_user(
+            username='test-9@mailinator.com', email='test-9@mailinator.com',
+            password=self.password, role=UserRole.STUDENT,
+        )
+        self.assertEqual(self._auth('test-9@mailinator.com'), student)
