@@ -103,7 +103,7 @@ def pick_next_speaker(client, active_advisors, transcript, beat_index, forced):
         )
 
     prompt = (
-        "You're directing a real conversation among a student and their business advisors, "
+        "You're directing a real conversation among a CIO and their business advisors, "
         "people who actually talk to each other, not a queue of one-on-one answers.\n\n"
         f"Advisors in the room:\n{roster}\n\n"
         f"Recent conversation:\n{transcript_text}\n\n"

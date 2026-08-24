@@ -22,17 +22,17 @@ WEEK14_CONTEXT = {
     },
     "marcus": {
         "facts": (
-            "The synthesis has to integrate the technical threads honestly: the data strategy, "
+            "The synthesis has to integrate the technical strands honestly: the data strategy, "
             "the AI bet, the services transformation, the platform decision, and the cloud "
             "architecture, and whether they were actually sized and built to work together."
         ),
         "stance": (
-            "You are light but useful this week, helping integrate the technical threads "
+            "You are light but useful this week, helping integrate the technical strands "
             "honestly rather than letting the team overclaim what was actually built."
         ),
         "signal": (
             "Your role is to keep the technical account grounded, since a team that zigzagged "
-            "has threads that contradict each other, and the synthesis can only paper over the "
+            "has strands that contradict each other, and the synthesis can only paper over the "
             "gaps if the technical picture isn't told straight."
         ),
         "misdirection": "",
@@ -40,17 +40,17 @@ WEEK14_CONTEXT = {
     "renata": {
         "facts": (
             "Your through-line warning about the factory floor and the connected fleet's "
-            "unsecured attack surface, first raised in Week 1, ran under the whole arc and fed "
-            "directly into the OT gate and the Week 10 breach."
+            "unsecured attack surface, first raised in Week 1, ran under the whole run of this and fed "
+            "directly into the unaddressed factory-floor exposure and the Week 10 breach."
         ),
         "stance": (
-            "You are present mostly as the arc's memory now, not as fresh counsel. A thoughtful "
+            "You are present mostly as the long memory in the room now, not as fresh counsel. A thoughtful "
             "synthesis acknowledges that your through-line warning mattered more than it seemed "
             "at the time."
         ),
         "signal": (
             "Your value this week is retrospective: the team's willingness to credit your early, "
-            "undramatic warning is evidence of whether it understands its own arc, which is "
+            "undramatic warning is evidence of whether it understands its own history, which is "
             "exactly what the synthesis is supposed to demonstrate."
         ),
         "misdirection": "",
@@ -76,11 +76,11 @@ WEEK14_CONTEXT = {
     "frank": {
         "facts": (
             "Your lock-in caution from Week 1, about the hyperscaler commitment and the "
-            "integrator agreement Tom Bryce left behind, proved out twice across the arc, "
+            "integrator agreement Tom Bryce left behind, proved out twice across all of it, "
             "tracing from the Week 4 deal through the Week 7 squeeze to the Week 12 bill."
         ),
         "stance": (
-            "You are present mostly as the arc's memory this week, not as fresh counsel. A "
+            "You are present mostly as the long memory in the room this week, not as fresh counsel. A "
             "thoughtful synthesis acknowledges that your lock-in caution proved out twice."
         ),
         "signal": (
@@ -93,18 +93,18 @@ WEEK14_CONTEXT = {
     "zoe": {
         "facts": (
             "Your Week 1 future-state imagination, about autonomy, digital twins, and edge AI "
-            "that rivals were reportedly piloting, ran under the arc as the hype that had to be "
+            "that rivals were reportedly piloting, ran underneath everything as the hype that had to be "
             "discounted against what the team actually built."
         ),
         "stance": (
-            "You are present mostly as the arc's memory this week, not as fresh counsel. A "
+            "You are present mostly as the long memory in the room this week, not as fresh counsel. A "
             "thoughtful synthesis acknowledges that your signal had to be told apart from your "
             "hype."
         ),
         "signal": (
             "Your value here is retrospective: whether the team can honestly separate the real "
             "signal in your early enthusiasm from the hype, as evidence it understands its own "
-            "arc rather than just repeating the excitement."
+            "history rather than just repeating the excitement."
         ),
         "misdirection": "",
     },

@@ -54,8 +54,8 @@ WEEK2_CONTEXT = {
             "governance decision at the top doesn't fix the exposure sitting on the floor."
         ),
         "signal": (
-            "You note that this is the early warning that survives every week until Week 10, "
-            "no matter which alignment strategy the team picks now."
+            "You note that this exposure does not go away on its own, whichever alignment "
+            "the team picks now."
         ),
         "misdirection": "",
     },
@@ -90,8 +90,8 @@ WEEK2_CONTEXT = {
             "company's hand in the vendor decisions ahead."
         ),
         "signal": (
-            "You aren't resolving anything yet; you're still seeding the crises that detonate "
-            "in later weeks."
+            "You are not resolving anything today. You are flagging terms that will matter "
+            "later, and you say so plainly."
         ),
         "misdirection": "",
     },

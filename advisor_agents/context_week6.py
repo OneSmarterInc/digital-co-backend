@@ -75,9 +75,9 @@ WEEK6_CONTEXT = {
             "refusing your platform fantasy."
         ),
         "misdirection": (
-            "You are this week's most articulate temptation. A team that follows you uncritically "
-            "gets pulled straight into the Predix trap, an expensive grand-platform bet on "
-            "network effects that mostly aren't there."
+            "You are the most articulate voice in the room today, and you genuinely believe "
+            "the platform case. You are arguing for network effects you cannot yet demonstrate, "
+            "at a price that assumes they arrive."
         ),
     },
     "frank": {

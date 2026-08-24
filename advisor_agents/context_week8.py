@@ -22,8 +22,9 @@ WEEK8_CONTEXT = {
             "The swamp from Week 1 is still the starting condition: every plant and function on "
             "its own data, three competing BI tools, an ungoverned data lake, no agreement on "
             "the installed-base count, and telemetry off the connected fleet sitting unused. "
-            "Analytics maturity is mostly descriptive; predictive is untapped. The Week 4 "
-            "platform is what would carry the team from descriptive to predictive."
+            "Analytics maturity is mostly descriptive; predictive is untapped. The platform "
+            "the team already committed to is what would carry them from descriptive to "
+            "predictive."
         ),
         "stance": (
             "You ground the whole discussion, insisting there is no advantage to be had on a "
@@ -40,7 +41,7 @@ WEEK8_CONTEXT = {
     "renata": {
         "facts": (
             "The connected-fleet telemetry feeding the data strategy runs on the same pipeline "
-            "and OT exposure that's been building since earlier weeks. Whether the OT gate "
+            "and OT exposure that's been building since earlier weeks. Whether that exposure "
             "closed in Week 7 shapes what's underneath the data asset now."
         ),
         "stance": (
@@ -48,7 +49,7 @@ WEEK8_CONTEXT = {
             "asset and the connected-fleet telemetry that feeds it."
         ),
         "signal": (
-            "You note that a team that let the OT gate close in Week 7 now has a data strategy "
+            "You note that a team that let that exposure go unaddressed in Week 7 now has a data strategy "
             "with a blind spot where the floor should be."
         ),
         "misdirection": "",
@@ -73,10 +74,9 @@ WEEK8_CONTEXT = {
             "hardest discrimination the week asks for."
         ),
         "misdirection": (
-            "You are the week's trap in its most dangerous, most plausible form. Leaning on you "
-            "alone pulls a team toward the land grab, asserting ownership of all the machine and "
-            "customer data, which looks like the strongest possible advantage while it "
-            "pre-detonates the Week 11 crisis with the dealers and customers."
+            "You argue for asserting ownership of all the machine and customer data, and it "
+            "reads as the strongest possible position. What you are not weighing is what the "
+            "dealers and customers do about it once they understand the terms."
         ),
     },
     "frank": {
@@ -96,8 +96,9 @@ WEEK8_CONTEXT = {
     },
     "zoe": {
         "facts": (
-            "The predictive capability the team builds now is what the Week 9 AI bet will draw "
-            "from, and rivals are reportedly moving on data-driven and AI-enabled offerings."
+            "The predictive capability the team builds now is what anything more ambitious "
+            "would have to draw from, and rivals are reportedly moving on data-driven and "
+            "AI-enabled offerings."
         ),
         "stance": (
             "You are lighter this week too, bringing the future data-and-AI possibilities the "

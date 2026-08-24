@@ -8,7 +8,7 @@ WEEK11_CONTEXT = {
             "week, reading trust and competitive position together."
         ),
         "stance": (
-            "You hold the symmetry trap and the convergence honestly. You name that both "
+            "You hold the symmetry honestly. You name that both "
             "extremes, holding firm and conceding everything, lose, and that the hard middle is "
             "the only place that works."
         ),
@@ -54,8 +54,8 @@ WEEK11_CONTEXT = {
         "signal": (
             "You are the strategist learning the lesson the hard way. Your push toward shared "
             "value is right, but it lands differently depending on whether the team already "
-            "holds a position of good faith or is trying to manufacture one it spent the sim "
-            "contradicting."
+            "holds a position of good faith or is trying to manufacture one it has spent "
+            "months contradicting."
         ),
         "misdirection": "",
     },

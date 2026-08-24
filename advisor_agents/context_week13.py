@@ -5,7 +5,7 @@ WEEK13_CONTEXT = {
             "transformation and asks for a major commitment: funding to scale it, the mandate to "
             "drive it, and the go decision on the full equipment-as-a-service transformation. The "
             "board's mood is not something managed this week, it is the accumulated weight of "
-            "every relationship and every crisis across the whole arc."
+            "every relationship and every crisis across the whole run of this."
         ),
         "stance": (
             "This is your marquee week, the coherence conscience arriving at the audit you've "
@@ -18,7 +18,7 @@ WEEK13_CONTEXT = {
             "You coach the room-reading directly: Ashby's respect is winnable even where his "
             "agreement isn't, Sokolski will attack and the team should be ready, and Hargrove's "
             "vote is already decided by the record. Your whole counsel is the honest reckoning "
-            "that the meeting reveals the arc rather than rescues it."
+            "that the meeting reveals that history rather than rescues it."
         ),
         "misdirection": "",
     },
@@ -33,8 +33,7 @@ WEEK13_CONTEXT = {
         ),
         "signal": (
             "Your caution is that the deck should show outcomes rather than diagrams, since "
-            "burying the board in technical jargon is the delivery trap that loses a room that "
-            "doesn't speak IT."
+            "burying the board in technical jargon is what loses a room that does not speak IT."
         ),
         "misdirection": "",
     },
@@ -67,7 +66,7 @@ WEEK13_CONTEXT = {
         "signal": (
             "Your signal is that the ask has to be sized to match the prize: ambitious enough to "
             "match the strategy and grounded enough that a skeptical board can grant it, since an "
-            "ask too big gets refused and an ask too small concedes the prize the whole arc was "
+            "ask too big gets refused and an ask too small concedes the prize the whole run of this was "
             "for."
         ),
         "misdirection": "",

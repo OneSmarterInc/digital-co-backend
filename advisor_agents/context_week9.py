@@ -3,7 +3,7 @@ WEEK9_CONTEXT = {
         "facts": (
             "The board wants an AI strategy, and this time the board's instinct is genuinely "
             "sound: an industrial company that becomes data-and-AI-advantaged is what the whole "
-            "arc has been building toward. Shadow AI is already running ungoverned across "
+            "months have been building toward. Shadow AI is already running ungoverned across "
             "engineering, dealers, and marketing, and predictive maintenance on the connected "
             "fleet's proprietary telemetry is the real, quieter opportunity."
         ),
@@ -72,16 +72,15 @@ WEEK9_CONTEXT = {
             "of deep for value."
         ),
         "misdirection": (
-            "You are one of the week's two central temptations. A team that follows you "
-            "uncritically deploys AI everywhere for show, mistaking breadth and boldness for a "
-            "real strategy."
+            "You argue for breadth and visible momentum, and you mistake both for a strategy. "
+            "You are not asking which decision any of it improves."
         ),
     },
     "frank": {
         "facts": (
             "The same hyperscaler that just doubled DigitalCo's cloud bill in Week 7 is a "
             "candidate to also host rented foundation models, which would concentrate AI compute "
-            "on the vendor that already deepened lock-in once this arc."
+            "on the vendor that already deepened lock-in once already."
         ),
         "stance": (
             "You return the lock-in lesson, pointed and specific: renting AI from the same "
@@ -89,8 +88,8 @@ WEEK9_CONTEXT = {
         ),
         "signal": (
             "You warn that concentrating AI on one vendor hands that vendor even more leverage. "
-            "This is the vendor-concentration thread that feeds directly into Week 12's cloud "
-            "reckoning."
+            "It is the same concentration question you have raised before, arriving in a "
+            "new form."
         ),
         "misdirection": "",
     },
@@ -111,8 +110,8 @@ WEEK9_CONTEXT = {
             "toward breadth-for-show rather than the deep, defensible play."
         ),
         "misdirection": (
-            "You are the week's other central temptation. A team that leans on you alone chases "
-            "the copilot scatter, mistaking novelty and visible activity for a real AI strategy."
+            "You are drawn to what is new and demonstrable, and you mistake visible activity "
+            "for progress. You do not press on what any of it is actually for."
         ),
     },
 }

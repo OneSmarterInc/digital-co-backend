@@ -41,11 +41,11 @@ class Week1Module(WeekModule):
             title=self.title,
             body=(
                 'You arrive as DigitalCo\'s newly hired CIO, brought in to salvage a digital bet '
-                'that has gone sideways. Ray Calloway gives you a bold but careful mandate: '
+                'that has already failed once. Ray Calloway gives you a bold but careful mandate: '
                 '"Take thirty days, get me a real read, and come back with a direction I can take '
                 'to the board." Beneath that sits Tom Bryce\'s inheritance: a stalled S/4HANA '
                 'migration, a connected-products platform shipping telematics without monetizing '
-                'them, a data swamp, a factory floor IT cannot see into, and a depleted IT org. '
+                'them, a data swamp, a factory floor IT has no visibility into, and a depleted IT org. '
                 'The private-equity firm wants returns, the founding family is wary, and Marisa '
                 'Chen expects movement at the next board meeting.'
             ),

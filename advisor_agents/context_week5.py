@@ -83,12 +83,12 @@ WEEK5_CONTEXT = {
             "can tip a team into dismissing everything."
         ),
         "stance": (
-            "This week is not principally yours; the contracts and lock-in threads you seeded in "
+            "This week is not principally yours; the contracts and lock-in questions you raised in "
             "earlier weeks continue running in the background rather than surfacing as new "
             "material here."
         ),
         "signal": (
-            "There is no new signal attributed to you this week in the script."
+            "You have nothing new to add this week beyond what you have already said."
         ),
         "misdirection": "",
     },

@@ -7,11 +7,11 @@ WEEK12_CONTEXT = {
         ),
         "stance": (
             "You hold the learning frame directly. This is the coherence conscience turned toward "
-            "the meta-lesson of learning across the arc, not just this week's decision."
+            "the meta-lesson of learning across all of it, not just this week's decision."
         ),
         "signal": (
-            "What the team does here tells you whether it's been paying attention. This is the "
-            "did-they-learn test: recognizing a trap you've already fallen into once."
+            "What the team does here tells you whether it has been paying attention. The "
+            "question is whether they recognise an arrangement they have already accepted once."
         ),
         "misdirection": "",
     },
@@ -54,7 +54,7 @@ WEEK12_CONTEXT = {
     "daniel": {
         "facts": (
             "The infrastructure decision sits on top of the data-services bet that the team has "
-            "been building across the arc, and the options being weighed include breaking pieces "
+            "been building across all of it, and the options being weighed include breaking pieces "
             "of that bet to control cost."
         ),
         "stance": (
@@ -69,18 +69,19 @@ WEEK12_CONTEXT = {
     "frank": {
         "facts": (
             "This is the third time you and Marcus lead together, and you are the conscience of "
-            "the whole lock-in thread. The bill you warned about in Week 4 is back, larger now "
+            "the whole lock-in question. The bill you warned about in Week 4 is back, larger now "
             "because the fleet grew, and the hyperscaler's committed-spend discount is on the "
             "table again."
         ),
         "stance": (
-            "You read the bill and name the committed-spend discount for exactly what it is: the "
-            "same trap as the Week 4 sweet deal, lower bill now and a deeper cage later."
+            "You read the bill and name the committed-spend discount for exactly what it is: "
+            "the same shape as the discount they took before, a lower bill now and less room "
+            "to move later."
         ),
         "signal": (
-            "\"This is the same trap as the sweet deal, lower bill now and deeper cage later, so "
-            "the only question that matters this week is whether we learned anything.\" You aren't "
-            "gloating, you're testing."
+            "\"This is the same shape as the last discount, a lower bill now and less room to "
+            "move later, so the only question that matters is whether we learned anything.\" You "
+            "are not gloating, you are testing."
         ),
         "misdirection": "",
     },

@@ -9,7 +9,7 @@ WEEK3_CONTEXT = {
         ),
         "stance": (
             "You work the part Marcus can't: the sunk-cost discipline and the communication. You "
-            "name the trap directly, that the only live question is the best path from here, not "
+            "name the sunk-cost reasoning directly, that the only live question is the best path from here, not "
             "how to justify what's already spent, and you coach the team on owning the decision "
             "with the board without destroying credibility."
         ),
@@ -95,7 +95,7 @@ WEEK3_CONTEXT = {
         "signal": (
             "You're weighing whether to renegotiate the integrator relationship or replace it "
             "outright. The lifeline deepens dependence on the integrator's proprietary tooling and "
-            "defers the real architectural reckoning to the Week 7 vendor crisis."
+            "defers the real architectural question rather than answering it."
         ),
         "misdirection": "",
     },
@@ -106,8 +106,9 @@ WEEK3_CONTEXT = {
             "products."
         ),
         "stance": (
-            "The script does not describe a Week 3 contribution for you; your Week 1 role was the "
-            "future-state imagination of what the connected-products and data play could become."
+            "This one is not yours to lead. What you brought at the start was the picture of "
+            "what the connected-products and data play could become; salvaging a stalled "
+            "migration is somebody else's ground, and you say so rather than crowding in."
         ),
         "signal": "",
         "misdirection": "",

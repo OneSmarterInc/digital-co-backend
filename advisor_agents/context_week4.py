@@ -67,8 +67,8 @@ WEEK4_CONTEXT = {
             "that's supposed to differentiate it."
         ),
         "signal": (
-            "You are the right corrective to the rent-the-cheapest-thing temptation, but your "
-            "usual bias pulls toward over-investing in the build."
+            "You are the right corrective to renting whatever is cheapest, but your usual bias "
+            "pulls toward over-investing in the build."
         ),
         "misdirection": "",
     },
@@ -86,9 +86,9 @@ WEEK4_CONTEXT = {
             "for portability and exit terms rather than swallowing the deal whole."
         ),
         "signal": (
-            "A team that hears you sets itself up to survive Weeks 7 and 12, while a team that "
-            "tunes you out walks into both. This is the deepest trap in the sim, and it doesn't "
-            "come due until later."
+            "What you are describing does not come due today, which is exactly why it gets "
+            "waved through. You state the exposure once, in terms of what it would cost to "
+            "leave later, and you do not chase it."
         ),
         "misdirection": "",
     },

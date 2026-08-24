@@ -51,7 +51,7 @@ WEEK7_CONTEXT = {
             "the thing that bites us in three weeks if we keep ignoring it.\" It's the through-"
             "line you've flagged since Week 1, now surfacing as an active warning. A team that "
             "hears you here is protected; a team that waves you off to fight the vendor fire "
-            "seals its Week 10 fate."
+            "is choosing which problem it would rather have."
         ),
         "misdirection": "",
     },
@@ -86,8 +86,8 @@ WEEK7_CONTEXT = {
             "hedging over time, or absorbing strategically."
         ),
         "signal": (
-            "You're blunt that the reflex to switch immediately is the trap dressed as "
-            "decisiveness."
+            "You are blunt that the reflex to switch immediately is panic wearing the clothes "
+            "of decisiveness."
         ),
         "misdirection": "",
     },
