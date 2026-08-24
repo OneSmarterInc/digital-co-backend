@@ -67,16 +67,30 @@ def _fmt_date(d):
 
 def _rounds(cohort, current_round):
     """Per-round schedule, honoring any stored extensions. Extending a round lengthens it and
-    pushes every later round forward, which mirrors what the detail screen promises."""
+    pushes every later round forward, which mirrors what the detail screen promises.
+
+    The active round is re-anchored to when it actually opened, and everything
+    after it follows from there. Without that, the whole calendar is
+    `start_date + N x length`, which is only correct if rounds advance on exactly
+    that cadence — they do not. An instructor who advances a day early leaves R2
+    apparently closing in fourteen days while R1 showed seven, and the error
+    compounds every round. Completed rounds keep their original dates: they are
+    history, and rewriting them would be a different lie.
+    """
     total = ADMIN_TOTAL_ROUNDS
     base_days = cohort.days_per_week or 7
     ext = cohort.round_extensions or {}
-    start = cohort.start_date
+    opened = getattr(cohort, 'current_round_opened_at', None)
+    opened_date = opened.date() if opened else None
+
     rows = []
-    cursor = start
+    cursor = cohort.start_date
     for n in range(1, total + 1):
         extra = int(ext.get(str(n), 0))
         length = base_days + extra
+        # Re-anchor at the active round, then let later rounds run on from it.
+        if n == current_round and opened_date:
+            cursor = opened_date
         if cursor:
             s = cursor
             e = cursor + timedelta(days=length)
@@ -242,6 +256,11 @@ class InstructorSimulationDetailView(APIView):
                 else:
                     cohort.start_date = parsed
                     changed.append('start_date')
+                    # Moving the start date is an explicit re-plan of the whole
+                    # calendar. A stale open-time anchor would quietly override
+                    # the new dates for the round in play, so it goes.
+                    cohort.current_round_opened_at = None
+                    changed.append('current_round_opened_at')
 
         if errors:
             return Response(
@@ -344,6 +363,12 @@ class InstructorAdvanceRoundView(APIView):
                 run.save(update_fields=['current_week'])
                 advanced += 1
         current = max((r.current_week for r in Run.objects.filter(team__cohort=cohort)), default=1)
+        if advanced:
+            # Stamp when this round actually opened so the countdown measures
+            # from now rather than from a calendar slot the cohort may be
+            # nowhere near.
+            cohort.current_round_opened_at = dj_timezone.now()
+            cohort.save(update_fields=['current_round_opened_at'])
         return Response({'advanced': advanced > 0, 'current_round': current})
 
 

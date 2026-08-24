@@ -69,6 +69,14 @@ class Cohort(models.Model):
     advisor_hourly_rate = models.PositiveIntegerField(default=DEFAULT_ADVISOR_HOURLY_RATE)
     registration_token = models.CharField(max_length=64, blank=True, default='')
     round_extensions = models.JSONField(default=dict, blank=True)  # {round_number: extra_days} added when a round is extended
+    # When the round currently in play actually opened. The calendar is derived
+    # from start_date + N round-lengths, which is only true if rounds advance on
+    # exactly that cadence — they do not. An instructor advances early, extends
+    # for a holiday, or opens a round late, and every displayed deadline drifts
+    # further from reality each round. Anchoring the active round here keeps the
+    # countdown honest. Null on cohorts that predate this, which fall back to
+    # the pure calendar.
+    current_round_opened_at = models.DateTimeField(null=True, blank=True)
     instructors = models.ManyToManyField(
         User,
         related_name='instructed_cohorts',
