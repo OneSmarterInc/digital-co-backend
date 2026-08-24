@@ -10,6 +10,7 @@ from django.test import TestCase, override_settings
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from api.instructor_api import InstructorInviteResendView, InstructorInviteView
+from api.account_api import PasswordResetRequestView, SetPasswordView
 from api.invite_api import InviteAcceptView, InviteDetailView
 from core.models import (
     Cohort, Enrollment, Invitation, InvitationStatus, Team, Tier, User, UserRole,
@@ -367,7 +368,7 @@ class FacultySetPasswordTests(TestCase):
         self.assertIn('/set-password/', self.outbox.outbox[0].text)
 
     def test_following_the_link_sets_a_password_once(self):
-        from api.account_api import SetPasswordView
+        from api.account_api import PasswordResetRequestView, SetPasswordView
         self._create()
         uid, token = self._link_from_outbox().rstrip('/').split('/set-password/')[1].split('/')
 
@@ -446,3 +447,96 @@ class EnrolmentConfirmationTests(MailerTestCase):
         invitation = self._invitation(team=None)
         self.assertEqual(self._accept(invitation).status_code, 201)
         self.assertTrue(Enrollment.objects.filter(cohort=self.cohort).exists())
+
+
+class PasswordResetRequestTests(TestCase):
+    """Asking for a reset link.
+
+    The response is identical whether or not the account exists — an
+    unauthenticated caller must not be able to use this to discover who is
+    enrolled.
+    """
+
+    def setUp(self):
+        self.outbox = LocmemBackend()
+        backends.set_backend(self.outbox)
+        self.addCleanup(backends.set_backend, None)
+        self.user = User.objects.create_user(
+            username='reset-me', password='old-password-123', email='reset@example.com',
+        )
+
+    def _ask(self, identifier):
+        request = APIRequestFactory().post(
+            '/api/password-reset/', {'identifier': identifier}, format='json',
+        )
+        return PasswordResetRequestView.as_view()(request)
+
+    def test_a_known_email_gets_a_link(self):
+        resp = self._ask('reset@example.com')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(self.outbox.outbox), 1)
+        self.assertEqual(self.outbox.outbox[0].to_email, 'reset@example.com')
+        self.assertIn('/set-password/', self.outbox.outbox[0].text)
+
+    def test_the_username_works_too(self):
+        self._ask('reset-me')
+        self.assertEqual(len(self.outbox.outbox), 1)
+
+    def test_matching_is_case_insensitive(self):
+        self._ask('RESET@Example.COM')
+        self.assertEqual(len(self.outbox.outbox), 1)
+
+    def test_an_unknown_address_is_answered_identically_and_sends_nothing(self):
+        known = self._ask('reset@example.com')
+        self.outbox.outbox.clear()
+        unknown = self._ask('nobody@example.com')
+        self.assertEqual(known.status_code, unknown.status_code)
+        self.assertEqual(known.data['detail'], unknown.data['detail'])
+        self.assertEqual(self.outbox.outbox, [], 'mail was sent for an account that does not exist')
+
+    def test_an_account_with_no_email_is_answered_identically(self):
+        User.objects.create_user(username='no-email-here', password='x')
+        resp = self._ask('no-email-here')
+        self.assertEqual(resp.data['detail'], PasswordResetRequestView.SENT)
+        self.assertEqual(self.outbox.outbox, [])
+
+    def test_an_inactive_account_cannot_be_recovered(self):
+        self.user.is_active = False
+        self.user.save(update_fields=['is_active'])
+        resp = self._ask('reset@example.com')
+        self.assertEqual(resp.data['detail'], PasswordResetRequestView.SENT)
+        self.assertEqual(self.outbox.outbox, [])
+
+    def test_an_empty_identifier_is_a_plain_validation_error(self):
+        resp = self._ask('   ')
+        self.assertEqual(resp.status_code, 400)
+
+    def test_the_emailed_link_actually_sets_a_new_password(self):
+        self._ask('reset@example.com')
+        url = self.outbox.outbox[0].text
+        uid, token = url.split('/set-password/')[1].split()[0].rstrip('.').split('/')
+
+        request = APIRequestFactory().post(
+            f'/api/set-password/{uid}/{token}/',
+            {'password': 'a-brand-new-password', 'password_confirm': 'a-brand-new-password'},
+            format='json',
+        )
+        resp = SetPasswordView.as_view()(request, uidb64=uid, token=token)
+        self.assertEqual(resp.status_code, 200)
+
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('a-brand-new-password'))
+        self.assertFalse(self.user.check_password('old-password-123'))
+
+    def test_the_link_is_spent_once_used(self):
+        self._ask('reset@example.com')
+        url = self.outbox.outbox[0].text
+        uid, token = url.split('/set-password/')[1].split()[0].rstrip('.').split('/')
+        body = {'password': 'a-brand-new-password', 'password_confirm': 'a-brand-new-password'}
+
+        def attempt():
+            request = APIRequestFactory().post(f'/api/set-password/{uid}/{token}/', body, format='json')
+            return SetPasswordView.as_view()(request, uidb64=uid, token=token)
+
+        self.assertEqual(attempt().status_code, 200)
+        self.assertEqual(attempt().status_code, 404, 'a used reset link still worked')

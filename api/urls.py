@@ -45,6 +45,7 @@ urlpatterns = [
     path('register/<str:token>/accept/', invite_api.RegistrationAcceptView.as_view(), name='registration_accept'),
 
     # Choosing a password from an emailed link (new faculty, and resets).
+    path('password-reset/', account_api.PasswordResetRequestView.as_view(), name='password_reset'),
     path('set-password/<str:uidb64>/<str:token>/', account_api.SetPasswordView.as_view(), name='set_password'),
     path('advisors/group/start/', views.GroupStartView.as_view(), name='advisor_group_start'),
     path('advisors/<int:advisor_id>/', views.AdvisorConversationView.as_view(), name='advisor'),

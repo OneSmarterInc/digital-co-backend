@@ -105,3 +105,71 @@ def send_faculty_invite(user, invited_by=None) -> tuple[bool, str, str]:
     except Exception as exc:  # never fail the create over delivery
         return False, url, str(exc)
     return True, url, ''
+
+
+def build_password_reset(user, url: str) -> Message:
+    """The 'I forgot my password' email.
+
+    Written for someone who is already locked out and mildly annoyed: what this
+    is, one link, how long it lasts, and what to do if they did not ask for it.
+    """
+    name = (user.get_full_name() or '').strip() or user.username
+
+    subject = 'Reset your FLEXEE · DigitalCo password'
+
+    text = f"""Hello {name},
+
+Someone asked to reset the password for your FLEXEE · DigitalCo account.
+
+Set a new one here:
+
+{url}
+
+The link works once, and stops working as soon as you have used it or changed
+your password another way.
+
+If this was not you, you can ignore this message. Your password has not been
+changed, and nobody can use the link without opening this email.
+"""
+
+    html = f"""<div style="background:#16191D;padding:32px 0;font-family:'IBM Plex Sans',Helvetica,Arial,sans-serif">
+  <div style="max-width:520px;margin:0 auto;background:#1E2228;border:1px solid #2C323A;border-radius:4px;overflow:hidden">
+    <div style="height:3px;background:#E8A13C"></div>
+    <div style="padding:28px 30px">
+      <p style="margin:0 0 18px;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#5C6672">
+        FLEXEE &middot; <span style="color:#E8A13C">DigitalCo</span>
+      </p>
+      <h1 style="margin:0 0 14px;font-size:26px;line-height:1.15;color:#ECEFF2;font-weight:700">
+        Reset your password
+      </h1>
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#8A94A0">
+        Hello {name}. Someone asked to reset the password for your account.
+      </p>
+      <p style="margin:0 0 22px">
+        <a href="{url}" style="display:inline-block;background:#E8A13C;color:#16191D;text-decoration:none;
+           padding:12px 22px;border-radius:2px;font-weight:700;font-size:15px">Set a new password</a>
+      </p>
+      <p style="margin:0 0 16px;font-size:13px;line-height:1.6;color:#5C6672">
+        The link works once, and stops working as soon as you have used it or changed your
+        password another way.
+      </p>
+      <p style="margin:0;font-size:13px;line-height:1.6;color:#5C6672">
+        If this was not you, ignore this message. Your password has not been changed.
+      </p>
+    </div>
+  </div>
+</div>"""
+
+    return Message(to_email=user.email, subject=subject, text=text, html=html, to_name=name)
+
+
+def send_password_reset(user) -> tuple[bool, str, str]:
+    """(sent, url, error). Requires an email address to send to."""
+    if not (user.email or '').strip():
+        return False, '', 'This account has no email address on file.'
+    url = set_password_url(user)
+    try:
+        get_backend().send(build_password_reset(user, url))
+    except SendError as exc:
+        return False, url, str(exc)
+    return True, url, ''
