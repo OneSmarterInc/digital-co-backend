@@ -135,3 +135,81 @@ class UsernameOrEmailLoginTests(TestCase):
             password=self.password, role=UserRole.STUDENT,
         )
         self.assertEqual(self._auth('test-9@mailinator.com'), student)
+
+
+class UsernameToEmailCommandTests(TestCase):
+    """Renaming is not undoable from the command, so the guards matter more than
+    the rename does."""
+
+    def _run(self, **kwargs):
+        from io import StringIO
+        from django.core.management import call_command
+        out = StringIO()
+        call_command('username_to_email', stdout=out, **kwargs)
+        return out.getvalue()
+
+    def test_it_reports_without_changing_anything_by_default(self):
+        from core.models import UserRole
+        user = User.objects.create_user(
+            username='shortname', email='person@example.com', password='pw', role=UserRole.ADMIN,
+        )
+        output = self._run()
+        self.assertIn('shortname  ->  person@example.com', output)
+        self.assertIn('Report only', output)
+        user.refresh_from_db()
+        self.assertEqual(user.username, 'shortname')
+
+    def test_apply_renames(self):
+        from core.models import UserRole
+        user = User.objects.create_user(
+            username='shortname', email='person@example.com', password='pw', role=UserRole.ADMIN,
+        )
+        self._run(apply=True)
+        user.refresh_from_db()
+        self.assertEqual(user.username, 'person@example.com')
+
+    def test_the_password_survives_the_rename(self):
+        from django.contrib.auth import authenticate
+        from core.models import UserRole
+        User.objects.create_user(
+            username='shortname', email='person@example.com',
+            password='a-long-enough-password', role=UserRole.ADMIN,
+        )
+        self._run(apply=True)
+        self.assertIsNotNone(authenticate(
+            username='person@example.com', password='a-long-enough-password'))
+
+    def test_a_rename_that_would_collide_is_refused(self):
+        """Usernames are unique. Renaming into an existing one would fail, and
+        forcing it would lock the other account out entirely."""
+        from core.models import UserRole
+        incumbent = User.objects.create_user(
+            username='taken@example.com', password='pw', role=UserRole.STUDENT,
+        )
+        mover = User.objects.create_user(
+            username='mover', email='taken@example.com', password='pw', role=UserRole.ADMIN,
+        )
+        output = self._run(apply=True)
+        self.assertIn('BLOCKED', output)
+        mover.refresh_from_db()
+        incumbent.refresh_from_db()
+        self.assertEqual(mover.username, 'mover')
+        self.assertEqual(incumbent.username, 'taken@example.com')
+
+    def test_an_account_with_no_email_is_left_alone(self):
+        from core.models import UserRole
+        user = User.objects.create_user(username='nomail', password='pw', role=UserRole.STUDENT)
+        self._run(apply=True)
+        user.refresh_from_db()
+        self.assertEqual(user.username, 'nomail')
+
+    def test_only_limits_the_change(self):
+        from core.models import UserRole
+        a = User.objects.create_user(
+            username='alpha', email='alpha@example.com', password='pw', role=UserRole.ADMIN)
+        b = User.objects.create_user(
+            username='beta', email='beta@example.com', password='pw', role=UserRole.ADMIN)
+        self._run(apply=True, only='alpha')
+        a.refresh_from_db(); b.refresh_from_db()
+        self.assertEqual(a.username, 'alpha@example.com')
+        self.assertEqual(b.username, 'beta')
