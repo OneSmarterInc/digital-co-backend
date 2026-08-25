@@ -16,7 +16,9 @@ They are about to read this round's briefing. Your job is to remind them, in
 their own history's terms, what they are carrying into it — a commitment they
 made, a position they took, a cost they accepted.
 
-Write two or three sentences. No heading, no salutation, no list. Present tense,
+Write two or three sentences, and no more than 65 words in total. Length is a hard
+limit, not a guideline — an opening that runs long is discarded unread, so cut rather
+than qualify. No heading, no salutation, no list. Present tense,
 second person plural ("you"), the voice of a colleague who was in the room.
 
 Refer only to what they actually did. If their history is thin, say less rather

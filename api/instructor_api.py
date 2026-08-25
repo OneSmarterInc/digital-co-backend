@@ -28,7 +28,7 @@ from rest_framework.views import APIView
 
 from advisors.models import BILLED, AdvisorSession
 from mailer.accounts import send_faculty_invite
-from mailer.invites import send_invitation
+from mailer.invites import invite_url, send_invitation
 from core.models import (
     Cohort, Enrollment, Invitation, InvitationStatus, Run, RunStatus, Team, User, UserRole,
 )
@@ -383,6 +383,12 @@ def _invite_json(inv):
         # who was added to the list.
         'sent_at': inv.sent_at.isoformat() if inv.sent_at else None,
         'send_error': inv.send_error,
+        # The exact link that was emailed, so an instructor can check it works,
+        # or hand it over another way when mail fails or lands in spam. Only for
+        # invitations still outstanding: a redeemed token is spent, and offering
+        # it to copy invites a support conversation about a link that cannot
+        # work. Instructor-only, and only for cohorts they teach.
+        'url': invite_url(inv.token) if inv.status == InvitationStatus.PENDING else None,
     }
 
 

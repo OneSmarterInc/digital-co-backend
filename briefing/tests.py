@@ -9,7 +9,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from api.views import RunView
 
-from briefing.prompts import SYSTEM_PROMPT, is_usable
+from briefing.prompts import MAX_WORDS, SYSTEM_PROMPT, is_usable
 from briefing.services import build_context, ensure_preamble, generate_preamble
 from core.models import Cohort, Run, Team, Tier, User
 from engine.services import view_briefing
@@ -231,3 +231,70 @@ class PerPageLoadTests(TestCase):
             instance = view_briefing(run)
         self.assertEqual(instance.preamble, '')
         self.assertEqual(stub.calls, 0)
+
+
+class LengthRetryTests(TestCase):
+    """A preamble that runs long is worth a second ask; one that leaks is not.
+
+    Overshooting the word limit is the common failure — the model writes
+    something perfectly good and goes over — and discarding it outright is why a
+    live backfill reported "too long for an opening" and wrote nothing. Naming
+    the scoring is a different failure, and retrying that just samples until one
+    slips through.
+    """
+
+    def setUp(self):
+        cohort = Cohort.objects.create(name='SIM-RETRY', tier=Tier.UNDERGRAD)
+        team = Team.objects.create(cohort=cohort, name='Team A')
+        user = User.objects.create_user(username='retry@example.com', password='pw')
+        team.members.add(user)
+        self.run = Run.objects.create(team=team, current_week=4)
+        self.run.state = {
+            **self.run.state,
+            'coherence_anchor': 'Data platform before ERP, and we accept the delay.',
+            'decision_history': [{'week': 1, 'choices': {'posture': 'consolidate'}}],
+        }
+        self.run.save()
+
+    def test_an_overlong_reply_is_asked_once_to_cut(self):
+        long_text = ' '.join(['word'] * (MAX_WORDS + 30))
+        stub = _SequenceStub([long_text, GOOD])
+        text, problem = generate_preamble(self.run, 4, client=stub)
+        self.assertEqual(problem, '')
+        self.assertEqual(text, GOOD)
+        self.assertEqual(stub.calls, 2)
+        self.assertIn('hard limit', stub.last_messages[-1]['content'])
+
+    def test_it_gives_up_after_one_retry(self):
+        long_text = ' '.join(['word'] * (MAX_WORDS + 30))
+        stub = _SequenceStub([long_text, long_text])
+        text, problem = generate_preamble(self.run, 4, client=stub)
+        self.assertEqual(text, '')
+        self.assertIn('too long', problem)
+        self.assertEqual(stub.calls, 2, 'retried more than once')
+
+    def test_a_leak_is_discarded_without_a_retry(self):
+        leaky = GOOD + ' Your coherence score is at risk.'
+        stub = _SequenceStub([leaky, GOOD])
+        text, problem = generate_preamble(self.run, 4, client=stub)
+        self.assertEqual(text, '')
+        self.assertIn('scoring machinery', problem)
+        self.assertEqual(stub.calls, 1, 'a leaking reply was retried')
+
+    def test_the_prompt_states_the_budget_the_guard_enforces(self):
+        self.assertIn('no more than 65 words', SYSTEM_PROMPT)
+        self.assertLess(65, MAX_WORDS, 'the prompt asks for more than the guard allows')
+
+
+class _SequenceStub:
+    """Returns each reply in turn, so a retry can be observed."""
+
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.calls = 0
+        self.last_messages = None
+
+    def complete(self, *, system, messages):
+        self.calls += 1
+        self.last_messages = messages
+        return self.replies[min(self.calls - 1, len(self.replies) - 1)]

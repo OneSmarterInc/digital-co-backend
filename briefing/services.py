@@ -10,7 +10,7 @@ that cannot play the round.
 """
 from advisors.llm_client import get_llm_client
 
-from .prompts import SYSTEM_PROMPT, is_usable
+from .prompts import MAX_WORDS, SYSTEM_PROMPT, is_usable
 
 PRIOR_ROUNDS = 3
 MAX_TEXT = 800
@@ -69,13 +69,42 @@ def generate_preamble(run, week_number: int, client=None) -> tuple[str, str]:
         # Nothing to be aware of. Asking anyway invites invention.
         return '', 'this firm has no recorded history yet'
 
+    context = build_context(run, week_number)
+
     try:
-        text = (client or get_llm_client()).complete(
+        # Resolving the client can itself fail (misconfigured provider), so it
+        # belongs inside the guard along with the call.
+        llm = client or get_llm_client()
+        text = llm.complete(
             system=SYSTEM_PROMPT,
-            messages=[{'role': 'user', 'content': build_context(run, week_number)}],
+            messages=[{'role': 'user', 'content': context}],
         ).strip()
     except Exception as exc:
         return '', f'could not be generated: {exc}'
+
+    # One retry, and only when the failure is length. A model that ran long has
+    # usually written something fine and simply overshot, so asking it to cut is
+    # worth a second call. A model that named the scoring or told the firm what
+    # to decide is a different matter — that output is discarded outright rather
+    # than coaxed, because retrying a leak just samples until one slips through.
+    ok, problem = is_usable(text)
+    if not ok and 'long' in problem:
+        try:
+            text = llm.complete(
+                system=SYSTEM_PROMPT,
+                messages=[
+                    {'role': 'user', 'content': context},
+                    {'role': 'assistant', 'content': text},
+                    {'role': 'user', 'content': (
+                        f'That is {len(text.split())} words. The hard limit is '
+                        f'{MAX_WORDS}. Rewrite it under that limit by cutting, not by '
+                        'compressing every sentence into a clause. Same content, fewer '
+                        'words. Reply with the rewritten opening only.'
+                    )},
+                ],
+            ).strip()
+        except Exception as exc:
+            return '', f'could not be generated: {exc}'
 
     ok, problem = is_usable(text)
     if not ok:
