@@ -61,6 +61,26 @@ def _registration_url(request, token):
     return f"{base.rstrip('/')}/register/{token}"
 
 
+def _slug(text):
+    """A filename-safe stem, so a cohort called 'MIS 7000 / Fall' cannot produce
+    a path separator or a quote inside a Content-Disposition header."""
+    import re
+
+    return re.sub(r'[^A-Za-z0-9]+', '-', str(text or '')).strip('-').lower()[:60]
+
+
+def _csv_safe(value):
+    """Defuse a cell Excel would treat as a formula.
+
+    Invitation emails come from whatever an instructor typed or uploaded, so a
+    value beginning =, +, - or @ is reachable by a hostile roster. Excel and
+    Sheets execute those on open; prefixing an apostrophe keeps the text intact
+    and inert. Links are unaffected because they start with 'h'.
+    """
+    text = '' if value is None else str(value)
+    return "'" + text if text[:1] in ('=', '+', '-', '@') else text
+
+
 def _fmt_date(d):
     return f'{calendar.month_abbr[d.month]} {d.day}, {d.year}'
 
@@ -399,6 +419,94 @@ class InstructorInvitationsView(APIView):
         cohort = _cohort_for(request, cohort_id)
         invites = Invitation.objects.filter(cohort=cohort)
         return Response([_invite_json(i) for i in invites])
+
+
+class InstructorInviteExportView(APIView):
+    """Download the outstanding invitations as a spreadsheet.
+
+    Email and link, one row per student, so an instructor can mail-merge them,
+    hand them out in class, or paste a link for the one person whose mail
+    bounced. Only invitations still pending: a redeemed token is spent, and a
+    sheet full of dead links is worse than no sheet.
+
+    Emits a real .xlsx when openpyxl is installed and falls back to CSV when it
+    is not, matching what the bulk-invite importer already does. Both open in
+    Excel, so no deployment has to grow a dependency for this.
+    """
+
+    permission_classes = [IsAuthenticated, IsInstructor]
+
+    HEADERS = ('Email', 'Invitation link', 'Firm', 'Invited', 'Emailed')
+
+    def get(self, request, cohort_id):
+        cohort = _cohort_for(request, cohort_id)
+        invites = (
+            Invitation.objects
+            .filter(cohort=cohort, status=InvitationStatus.PENDING)
+            .select_related('team')
+            .order_by('email')
+        )
+        rows = [
+            (
+                inv.email,
+                invite_url(inv.token),
+                inv.team.name if inv.team else '',
+                _fmt_date(inv.created_at.date()) if inv.created_at else '',
+                _fmt_date(inv.sent_at.date()) if inv.sent_at else 'not sent',
+            )
+            for inv in invites
+        ]
+
+        stem = _slug(cohort.name) or 'cohort'
+        try:
+            content, content_type, ext = self._xlsx(cohort, rows)
+        except ImportError:
+            content, content_type, ext = self._csv(rows)
+
+        response = HttpResponse(content, content_type=content_type)
+        response['Content-Disposition'] = (
+            f'attachment; filename="{stem}-pending-invitations.{ext}"'
+        )
+        return response
+
+    def _xlsx(self, cohort, rows):
+        from io import BytesIO
+
+        from openpyxl import Workbook  # raises ImportError when unavailable
+        from openpyxl.styles import Font
+
+        book = Workbook()
+        sheet = book.active
+        sheet.title = 'Pending invitations'
+        sheet.append(list(self.HEADERS))
+        for cell in sheet[1]:
+            cell.font = Font(bold=True)
+        for row in rows:
+            sheet.append(list(row))
+        for column, width in zip('ABCDE', (34, 78, 16, 14, 14)):
+            sheet.column_dimensions[column].width = width
+        sheet.freeze_panes = 'A2'
+
+        buffer = BytesIO()
+        book.save(buffer)
+        return (
+            buffer.getvalue(),
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'xlsx',
+        )
+
+    def _csv(self, rows):
+        import csv
+        from io import StringIO
+
+        buffer = StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(self.HEADERS)
+        for row in rows:
+            writer.writerow([_csv_safe(value) for value in row])
+        # BOM so Excel opens UTF-8 addresses correctly on a double click rather
+        # than mangling any non-ASCII name in them.
+        return '\ufeff' + buffer.getvalue(), 'text/csv; charset=utf-8', 'csv'
 
 
 class InstructorInviteView(APIView):

@@ -6,6 +6,7 @@ run resolution must be scoped to the cohort the request targets, not collapse
 onto an arbitrary Run.first(). Regression guard for the bug where every student
 runtime endpoint served whichever run happened to come back first.
 """
+import secrets
 from datetime import date
 from unittest.mock import patch
 
@@ -19,6 +20,7 @@ from advisors.models import (
     BILLED, AdvisorDefinition, AdvisorSession, Conversation, GroupSession,
 )
 from core.models import (
+    Invitation, InvitationStatus,
     DEFAULT_ADVISOR_HOURLY_RATE, Cohort, Enrollment, Invitation, Run, Team, Tier, User, UserRole,
 )
 from core.state import SCORE_DIMENSIONS
@@ -30,7 +32,8 @@ from weeks.models import Submission, WeekInstance, WeekInstanceStatus
 
 from .instructor_api import (
     InstructorCoFacultyDetailView, InstructorCoFacultyView,
-    InstructorFirmDetailView, InstructorFirmsView, InstructorMoveEnrollmentView,
+    InstructorFirmDetailView, InstructorFirmsView, InstructorInviteExportView,
+    InstructorMoveEnrollmentView,
     InstructorSimulationDetailView, _advisor_usage_by_student, _billing,
 )
 from .student_api import StudentPerformanceView
@@ -1322,3 +1325,81 @@ class ReviseGradeOverTheWireTests(TestCase):
         self.record.refresh_from_db()
         self.assertEqual(self.record.strategic_judgment, auto + 1)
         self.assertEqual(self._accumulated()['strategic_judgment'], auto + 1)
+
+
+class PendingInviteExportTests(TestCase):
+    """The spreadsheet an instructor hands round.
+
+    Pending only, with the real link, and safe to open in Excel — the rows are
+    built from addresses somebody typed or uploaded.
+    """
+
+    def setUp(self):
+        self.instructor = User.objects.create_user(
+            username='export-teacher@example.com', password='pw', role=UserRole.INSTRUCTOR,
+        )
+        self.cohort = Cohort.objects.create(name='MIS 7000 / Fall', tier=Tier.GRADUATE)
+        self.cohort.instructors.add(self.instructor)
+        self.team = Team.objects.create(cohort=self.cohort, name='Team 1')
+
+    def _invite(self, email, status=InvitationStatus.PENDING, team=None):
+        return Invitation.objects.create(
+            cohort=self.cohort, email=email, token=secrets.token_urlsafe(24),
+            status=status, team=team, invited_by=self.instructor,
+        )
+
+    def _download(self):
+        request = APIRequestFactory().get(
+            f'/api/instructor/simulations/{self.cohort.id}/invitations/export/'
+        )
+        force_authenticate(request, user=self.instructor)
+        resp = InstructorInviteExportView.as_view()(request, cohort_id=self.cohort.id)
+        return resp, resp.content.decode('utf-8-sig')
+
+    def test_pending_rows_carry_the_real_link(self):
+        inv = self._invite('a@example.com', team=self.team)
+        resp, body = self._download()
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('a@example.com', body)
+        self.assertIn(inv.token, body)
+        self.assertIn('Team 1', body)
+
+    def test_accepted_invitations_are_left_out(self):
+        self._invite('pending@example.com')
+        spent = self._invite('done@example.com', status=InvitationStatus.ACCEPTED)
+        _, body = self._download()
+        self.assertIn('pending@example.com', body)
+        self.assertNotIn('done@example.com', body)
+        self.assertNotIn(spent.token, body, 'a spent token was published')
+
+    def test_a_formula_in_an_address_cannot_execute_in_excel(self):
+        """Addresses come from whatever was typed or uploaded, and Excel runs a
+        cell beginning =, +, - or @ when the sheet is opened."""
+        self._invite('=cmd|calc!A1')
+        _, body = self._download()
+        self.assertIn("'=cmd|calc!A1", body)
+        self.assertNotIn('\n=cmd', body)
+        self.assertNotIn(',=cmd', body)
+
+    def test_the_filename_is_safe_and_names_the_cohort(self):
+        self._invite('a@example.com')
+        resp, _ = self._download()
+        disposition = resp['Content-Disposition']
+        self.assertIn('mis-7000-fall-pending-invitations', disposition)
+        # A cohort name with a slash or a quote must not escape the header.
+        self.assertNotIn('/', disposition.split('filename=')[1])
+
+    def test_another_instructors_cohort_is_refused(self):
+        outsider = User.objects.create_user(
+            username='outsider@example.com', password='pw', role=UserRole.INSTRUCTOR,
+        )
+        self._invite('a@example.com')
+        request = APIRequestFactory().get('/x/')
+        force_authenticate(request, user=outsider)
+        resp = InstructorInviteExportView.as_view()(request, cohort_id=self.cohort.id)
+        self.assertEqual(resp.status_code, 404, 'an outsider downloaded another cohort\'s links')
+
+    def test_an_empty_cohort_still_returns_a_sheet_with_headers(self):
+        resp, body = self._download()
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('Invitation link', body)

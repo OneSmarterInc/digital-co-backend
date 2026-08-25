@@ -67,6 +67,7 @@ urlpatterns = [
     path('instructor/simulations/<int:cohort_id>/advance-round/', instructor_api.InstructorAdvanceRoundView.as_view(), name='instructor_advance_round'),
     path('instructor/simulations/<int:cohort_id>/invite/', instructor_api.InstructorInviteView.as_view(), name='instructor_invite'),
     path('instructor/simulations/<int:cohort_id>/invitations/', instructor_api.InstructorInvitationsView.as_view(), name='instructor_invitations'),
+    path('instructor/simulations/<int:cohort_id>/invitations/export/', instructor_api.InstructorInviteExportView.as_view(), name='instructor_invitations_export'),
     path('instructor/simulations/<int:cohort_id>/invitations/<uuid:invitation_id>/resend/', instructor_api.InstructorInviteResendView.as_view(), name='instructor_invite_resend'),
     path('instructor/simulations/<int:cohort_id>/bulk-invite/', instructor_api.InstructorBulkInviteView.as_view(), name='instructor_bulk_invite'),
     path('instructor/simulations/<int:cohort_id>/bulk-invite-template/', instructor_api.InstructorBulkInviteTemplateView.as_view(), name='instructor_bulk_invite_template'),
