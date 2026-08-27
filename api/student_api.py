@@ -211,6 +211,68 @@ def _student_standings(run):
     return rows
 
 
+class StudentFirmView(APIView):
+    """Who is in the requesting student's firm.
+
+    A team commits one decision a week and is told to split the advisors between
+    them, which is impossible if you do not know who "them" is. Students invited
+    by email land in a firm without ever being told who else is in it.
+
+    Scoped to the caller's own firm: this returns nothing about any other team,
+    so it cannot be used to map the cohort. Names only — an address is the
+    instructor's to share, not something the roster should hand out.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from core.models import Team
+
+        cohort_id = request.query_params.get('cohort')
+        enrollment = (
+            Enrollment.objects
+            .select_related('team', 'cohort')
+            .filter(student=request.user, **({'cohort_id': cohort_id} if cohort_id else {}))
+            .first()
+        )
+        if enrollment is None:
+            return Response({'detail': 'You are not enrolled in this simulation.'}, status=404)
+
+        team = enrollment.team
+        if team is None:
+            # Placed later by the instructor. Say so plainly rather than
+            # returning an empty roster, which reads as "your firm is empty".
+            return Response({
+                'firm': None,
+                'firm_index': None,
+                'members': [],
+                'awaiting_placement': True,
+            })
+
+        _, numbering = _firm_numbering(enrollment.cohort)
+        number = numbering.get(team.id)
+
+        members = []
+        for member in team.members.all().order_by('first_name', 'last_name', 'username'):
+            name = (member.get_full_name() or '').strip()
+            members.append({
+                'id': member.id,
+                # Someone invited by email who has not completed their profile
+                # has no name yet. Their username is their address, so showing
+                # it as a fallback would publish the address to the team.
+                'name': name or 'Joining soon',
+                'named': bool(name),
+                'is_you': member.id == request.user.id,
+            })
+
+        return Response({
+            'firm': team.name,
+            'firm_index': (number - 1) if number else None,
+            'members': members,
+            'awaiting_placement': False,
+        })
+
+
 class StudentPerformanceView(APIView):
     """Past-round performance for the requesting student's firm.
 

@@ -15,6 +15,7 @@ urlpatterns = [
 
     # Student weekly loop
     path('student/simulations/', student_api.StudentSimulationsView.as_view(), name='student_simulations'),
+    path('student/firm/', student_api.StudentFirmView.as_view(), name='student_firm'),
     path('student/performance/', student_api.StudentPerformanceView.as_view(), name='student_performance'),
     path('run/', views.RunView.as_view(), name='run'),
     path('run/submit/', views.SubmitView.as_view(), name='run_submit'),

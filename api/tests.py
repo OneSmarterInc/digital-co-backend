@@ -36,7 +36,7 @@ from .instructor_api import (
     InstructorMoveEnrollmentView,
     InstructorSimulationDetailView, _advisor_usage_by_student, _billing,
 )
-from .student_api import StudentPerformanceView
+from .student_api import StudentFirmView, StudentPerformanceView
 from .views import (
     AdminFacultyView, AdminSimulationsView, GroupConversationView, InstructorBenchmarkRevealView,
     InstructorFeedbackDraftView, InstructorQueueView, InstructorScoreView, RunView,
@@ -1408,3 +1408,79 @@ class PendingInviteExportTests(TestCase):
         resp, body = self._download()
         self.assertEqual(resp.status_code, 200)
         self.assertIn('Invitation link', body)
+
+
+class StudentFirmRosterTests(TestCase):
+    """A student can see their own firm and nobody else's."""
+
+    def setUp(self):
+        self.cohort = Cohort.objects.create(name='SIM-ROSTER', tier=Tier.UNDERGRAD)
+        self.mine = Team.objects.create(cohort=self.cohort, name='Team 1')
+        self.theirs = Team.objects.create(cohort=self.cohort, name='Team 2')
+
+        self.me = User.objects.create_user(
+            username='me@example.com', password='pw', role=UserRole.STUDENT,
+            first_name='Ada', last_name='Lovelace',
+        )
+        self.mate = User.objects.create_user(
+            username='mate@example.com', password='pw', role=UserRole.STUDENT,
+            first_name='Grace', last_name='Hopper',
+        )
+        self.stranger = User.objects.create_user(
+            username='stranger@example.com', password='pw', role=UserRole.STUDENT,
+            first_name='Alan', last_name='Turing',
+        )
+        for user, team in ((self.me, self.mine), (self.mate, self.mine), (self.stranger, self.theirs)):
+            team.members.add(user)
+            Enrollment.objects.create(cohort=self.cohort, student=user, team=team)
+
+    def _get(self, user):
+        request = APIRequestFactory().get(f'/api/student/firm/?cohort={self.cohort.id}')
+        force_authenticate(request, user=user)
+        return StudentFirmView.as_view()(request)
+
+    def test_a_student_sees_their_own_firm_and_teammates(self):
+        data = self._get(self.me).data
+        self.assertEqual(data['firm'], 'Team 1')
+        names = [m['name'] for m in data['members']]
+        self.assertEqual(sorted(names), ['Ada Lovelace', 'Grace Hopper'])
+        self.assertTrue(any(m['is_you'] for m in data['members']))
+
+    def test_another_firms_members_are_not_returned(self):
+        blob = str(self._get(self.me).data)
+        self.assertNotIn('Turing', blob, "another firm's roster leaked")
+        self.assertNotIn('Team 2', blob)
+
+    def test_no_email_addresses_are_published_to_the_team(self):
+        blob = str(self._get(self.me).data)
+        for address in ('me@example.com', 'mate@example.com'):
+            self.assertNotIn(address, blob, 'an address was published to the firm')
+
+    def test_a_member_with_no_name_yet_does_not_expose_their_address(self):
+        """An invited student who has not completed their profile has a username
+        that is their email address. Falling back to it would publish it."""
+        nameless = User.objects.create_user(
+            username='nameless@example.com', password='pw', role=UserRole.STUDENT,
+        )
+        self.mine.members.add(nameless)
+        Enrollment.objects.create(cohort=self.cohort, student=nameless, team=self.mine)
+
+        data = self._get(self.me).data
+        blob = str(data)
+        self.assertNotIn('nameless@example.com', blob)
+        self.assertIn('Joining soon', blob)
+        self.assertFalse([m for m in data['members'] if not m['named']][0]['named'])
+
+    def test_an_unplaced_student_is_told_so_rather_than_shown_an_empty_firm(self):
+        loose = User.objects.create_user(
+            username='loose@example.com', password='pw', role=UserRole.STUDENT, first_name='Ida',
+        )
+        Enrollment.objects.create(cohort=self.cohort, student=loose, team=None)
+        data = self._get(loose).data
+        self.assertTrue(data['awaiting_placement'])
+        self.assertIsNone(data['firm'])
+        self.assertEqual(data['members'], [])
+
+    def test_someone_not_enrolled_gets_a_404(self):
+        outsider = User.objects.create_user(username='out@example.com', password='pw')
+        self.assertEqual(self._get(outsider).status_code, 404)
