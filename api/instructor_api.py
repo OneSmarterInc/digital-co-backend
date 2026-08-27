@@ -85,6 +85,27 @@ def _fmt_date(d):
     return f'{calendar.month_abbr[d.month]} {d.day}, {d.year}'
 
 
+def _round_boundary(last_day, tz_name):
+    """The moment a round closes: 23:59:59 on its final day, in the cohort's zone.
+
+    A seven-day round opening on the 15th runs through the 21st, so the deadline
+    is the end of the 21st rather than the first instant of the 22nd. The same
+    length either way, but "closes Tue 21 Jul, 11:59 PM" is read correctly by
+    everyone, where "closes Wed 22 Jul, 12:00 AM" is read as a day later by half.
+
+    An unknown or misconfigured timezone falls back to UTC rather than raising: a
+    deadline wrong by hours is a problem, a 500 on the schedule screen is worse.
+    """
+    from datetime import datetime, time
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    try:
+        tz = ZoneInfo(tz_name or 'UTC')
+    except (ZoneInfoNotFoundError, ValueError):
+        tz = ZoneInfo('UTC')
+    return datetime.combine(last_day, time(23, 59, 59), tzinfo=tz).isoformat()
+
+
 def _rounds(cohort, current_round):
     """Per-round schedule, honoring any stored extensions. Extending a round lengthens it and
     pushes every later round forward, which mirrors what the detail screen promises.
@@ -111,15 +132,38 @@ def _rounds(cohort, current_round):
         # Re-anchor at the active round, then let later rounds run on from it.
         if n == current_round and opened_date:
             cursor = opened_date
+        end_at = None
         if cursor:
             s = cursor
+            # `e` is the day the NEXT round opens; this one's final day is the
+            # day before. Showing `e` as the end date made every round appear to
+            # end on the day its successor began.
             e = cursor + timedelta(days=length)
-            start_str, end_str = _fmt_date(s), _fmt_date(e)
+            last_day = e - timedelta(days=1)
+            start_str, end_str = _fmt_date(s), _fmt_date(last_day)
+            # The exact instant the round closes, carrying the cohort's own UTC
+            # offset. A date alone left every client to guess a time, and they
+            # guessed midnight UTC — which is the previous evening for a US
+            # cohort and the same morning for an Indian one. Students plan
+            # against this number, so it states the moment rather than implying
+            # one.
+            end_at = _round_boundary(last_day, cohort.timezone)
             cursor = e
         else:
             start_str = end_str = '\u2014'
         status = 'Completed' if n < current_round else 'Active' if n == current_round else 'Upcoming'
-        rows.append({'n': n, 'start': start_str, 'end': end_str, 'status': status, 'extended_days': extra})
+        rows.append({
+            'n': n,
+            'start': start_str,
+            'end': end_str,
+            'end_at': end_at,
+            # Carried per row so a client can render the deadline in the
+            # course's zone rather than the viewer's. A student travelling, or
+            # an instructor abroad, must see the same deadline the cohort has.
+            'timezone': cohort.timezone or 'UTC',
+            'status': status,
+            'extended_days': extra,
+        })
     return rows
 
 

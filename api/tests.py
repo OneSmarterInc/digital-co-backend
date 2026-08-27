@@ -772,7 +772,12 @@ class StartDateChangeTests(TestCase):
         rounds = self._patch({'start_date': '2026-10-01'}).data['rounds']
         self.assertEqual(rounds[1]['extended_days'], 3)
         # R2 is three days longer than the 7-day default, so R3 starts later.
-        self.assertEqual(rounds[1]['end'], rounds[2]['start'])
+        # A round now ends on its own final day and the next opens the day
+        # after, rather than both sharing a date and reading as an overlap.
+        from datetime import datetime, timedelta
+
+        parse = lambda text: datetime.strptime(text, '%b %d, %Y').date()
+        self.assertEqual(parse(rounds[2]['start']), parse(rounds[1]['end']) + timedelta(days=1))
 
     def test_a_bad_date_is_rejected_and_nothing_moves(self):
         for bad in ('', 'next tuesday', '2026-13-45'):
