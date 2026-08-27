@@ -85,13 +85,21 @@ def _fmt_date(d):
     return f'{calendar.month_abbr[d.month]} {d.day}, {d.year}'
 
 
+# When a round closes on its final day, in the cohort's own timezone.
+# Deliberately an afternoon rather than midnight: a deadline inside the working
+# day is one the instructor is awake for, so a firm that misses it by minutes can
+# be dealt with rather than discovered the next morning. One place to change it.
+ROUND_CLOSE_HOUR = 16
+ROUND_CLOSE_MINUTE = 0
+
+
 def _round_boundary(last_day, tz_name):
-    """The moment a round closes: 23:59:59 on its final day, in the cohort's zone.
+    """The moment a round closes, as an ISO timestamp with a real UTC offset.
 
     A seven-day round opening on the 15th runs through the 21st, so the deadline
-    is the end of the 21st rather than the first instant of the 22nd. The same
-    length either way, but "closes Tue 21 Jul, 11:59 PM" is read correctly by
-    everyone, where "closes Wed 22 Jul, 12:00 AM" is read as a day later by half.
+    sits on the 21st rather than the first instant of the 22nd — the same length
+    either way, but "closes Tue 21 Jul" is read correctly where "Wed 22 Jul,
+    12:00 AM" is read as a day later by half of them.
 
     An unknown or misconfigured timezone falls back to UTC rather than raising: a
     deadline wrong by hours is a problem, a 500 on the schedule screen is worse.
@@ -103,7 +111,8 @@ def _round_boundary(last_day, tz_name):
         tz = ZoneInfo(tz_name or 'UTC')
     except (ZoneInfoNotFoundError, ValueError):
         tz = ZoneInfo('UTC')
-    return datetime.combine(last_day, time(23, 59, 59), tzinfo=tz).isoformat()
+    close = time(ROUND_CLOSE_HOUR, ROUND_CLOSE_MINUTE)
+    return datetime.combine(last_day, close, tzinfo=tz).isoformat()
 
 
 def _rounds(cohort, current_round):

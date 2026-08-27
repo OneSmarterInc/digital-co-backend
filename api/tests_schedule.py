@@ -114,10 +114,19 @@ class DeadlineInstantTests(TestCase):
             start_date=date(2026, 7, 15), days_per_week=7, timezone=tz,
         )
 
-    def test_a_round_closes_at_2359_on_its_final_day(self):
+    def test_a_round_closes_at_the_configured_hour_on_its_final_day(self):
+        """An afternoon deadline, not midnight: the instructor is awake for it."""
         rows = _rounds(self._cohort('America/New_York'), 1)
-        self.assertEqual(rows[0]['end_at'], '2026-07-21T23:59:59-04:00')
+        self.assertEqual(rows[0]['end_at'], '2026-07-21T16:00:00-04:00')
         self.assertEqual(rows[0]['end'], _fmt_date(date(2026, 7, 21)))
+
+    def test_the_close_time_is_set_in_one_place(self):
+        """Changing the hour must not mean hunting through the calendar code."""
+        from api.instructor_api import ROUND_CLOSE_HOUR, ROUND_CLOSE_MINUTE
+
+        rows = _rounds(self._cohort('America/New_York'), 1)
+        clock = rows[0]['end_at'].split('T')[1][:5]
+        self.assertEqual(clock, f'{ROUND_CLOSE_HOUR:02d}:{ROUND_CLOSE_MINUTE:02d}')
 
     def test_the_next_round_opens_the_day_after_this_one_ends(self):
         rows = _rounds(self._cohort('America/New_York'), 1)
