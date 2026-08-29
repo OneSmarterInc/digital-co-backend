@@ -1387,7 +1387,22 @@ class InstructorMimicRunView(APIView):
 
         return Response({
             'mimic': True,
-            'firm': {'number': firm_number, 'name': team.name},
+            # Members included so the mimic can show the firm roster the
+            # student sees. Names only, matching the student endpoint: mimicking
+            # a student should show what they see, not more.
+            'firm': {
+                'number': firm_number,
+                'name': team.name,
+                'members': [
+                    {
+                        'id': m.id,
+                        'name': (m.get_full_name() or '').strip() or 'Joining soon',
+                        'named': bool((m.get_full_name() or '').strip()),
+                        'is_you': False,
+                    }
+                    for m in team.members.all().order_by('first_name', 'last_name', 'username')
+                ],
+            },
             'run': {
                 'id': run.id,
                 'current_week': run.current_week,
