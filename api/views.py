@@ -168,6 +168,14 @@ class RunView(APIView):
             'week': serialize.week_status(instance),
             'briefing': serialize.briefing_json(briefing_for(module, tier, run), instance.preamble),
             'artifacts': serialize.artifacts_json(module.artifacts(tier)),
+            # Everything released before this round, grouped by the round that
+            # released it. The week's own files stay first and unchanged — these
+            # sit below them, because a firm weighing this week's decision has
+            # to be able to reach the numbers the earlier memos argued from
+            # without leaving the briefing.
+            'earlier_artifacts': serialize.earlier_artifacts_json(
+                instance.week_number, tier,
+            ),
             'decision_spec': serialize.decision_spec_json(module.decision_spec(tier)),
             'advisors': [serialize.advisor_json(a) for a in AdvisorDefinition.objects.filter(active=True)],
             'debrief_available': debrief_ready,

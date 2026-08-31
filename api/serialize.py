@@ -35,6 +35,33 @@ def briefing_json(briefing, preamble=''):
     }
 
 
+def earlier_artifacts_json(current_week, tier):
+    """Reference files from every round before this one, newest first.
+
+    Rounds are labelled so a reader knows when a document was issued; the memo
+    that argues from a number and the exhibit carrying that number are usually
+    weeks apart. Never includes the current round (it is listed separately and
+    would duplicate) and never a later one.
+    """
+    from weeks.registry import registry
+
+    rounds = []
+    for week in range(1, max(1, current_week)):
+        try:
+            module = registry.get(week)
+        except Exception:
+            continue
+        artifacts = module.artifacts(tier)
+        if artifacts:
+            rounds.append({
+                'week': week,
+                'title': getattr(module, 'title', '') or f'Round {week}',
+                'artifacts': artifacts_json(artifacts),
+            })
+    rounds.reverse()
+    return rounds
+
+
 def artifacts_json(artifacts):
     return [{'title': a.title, 'body': a.body, 'kind': a.kind} for a in artifacts]
 

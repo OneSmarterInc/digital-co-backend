@@ -1551,3 +1551,52 @@ class StudentArtifactArchiveTests(TestCase):
         request = APIRequestFactory().get('/api/student/artifacts/')
         force_authenticate(request, user=loose)
         self.assertEqual(StudentArtifactsView.as_view()(request).status_code, 404)
+
+
+class BriefingCarriesEarlierFilesTests(TestCase):
+    """This week's memos argue from numbers issued in earlier rounds. Before
+    this, the briefing showed only the current round's files, so a firm could
+    read the argument without being able to reach the evidence."""
+
+    def setUp(self):
+        self.student = User.objects.create_user(
+            username='earlier@example.com', password='pw', role=UserRole.STUDENT,
+        )
+        cohort = Cohort.objects.create(name='SIM-EARLIER', tier=Tier.UNDERGRAD)
+        team = Team.objects.create(cohort=cohort, name='Team 1')
+        team.members.add(self.student)
+        Enrollment.objects.create(cohort=cohort, student=self.student, team=team)
+        self.cohort = cohort
+        self.run = Run.objects.create(team=team)
+
+    def _run_payload(self, week):
+        self.run.current_week = week
+        self.run.save(update_fields=['current_week'])
+        request = APIRequestFactory().get(f'/api/run/?cohort={self.cohort.id}')
+        force_authenticate(request, user=self.student)
+        return RunView.as_view()(request).data
+
+    def test_round_one_has_nothing_earlier(self):
+        self.assertEqual(self._run_payload(1)['earlier_artifacts'], [])
+
+    def test_round_two_carries_round_one(self):
+        data = self._run_payload(2)
+        weeks = [r['week'] for r in data['earlier_artifacts']]
+        self.assertEqual(weeks, [1])
+        titles = [a['title'] for a in data['earlier_artifacts'][0]['artifacts']]
+        self.assertIn('Application Portfolio Map', titles)
+
+    def test_round_three_carries_both_earlier_rounds_newest_first(self):
+        data = self._run_payload(3)
+        self.assertEqual([r['week'] for r in data['earlier_artifacts']], [2, 1])
+
+    def test_the_current_round_is_not_duplicated_below(self):
+        data = self._run_payload(2)
+        current = {a['title'] for a in data['artifacts']}
+        earlier = {a['title'] for r in data['earlier_artifacts'] for a in r['artifacts']}
+        self.assertFalse(current & earlier, 'this round appeared twice on the briefing')
+
+    def test_no_later_round_is_ever_included(self):
+        data = self._run_payload(3)
+        weeks = [r['week'] for r in data['earlier_artifacts']]
+        self.assertTrue(all(w < 3 for w in weeks), weeks)
