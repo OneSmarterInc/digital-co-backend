@@ -211,62 +211,6 @@ def _student_standings(run):
     return rows
 
 
-class StudentArtifactsView(APIView):
-    """Every reference file released to this firm so far, grouped by round.
-
-    The week's own files still appear in its briefing. This is the archive: a
-    firm in Round 2 weighing the two rival plans has to be able to reopen the
-    Week 1 portfolio map to check that S/4 runs $6.8M a year against the $3.1M
-    core it was meant to replace. Before this, a round's files vanished the
-    moment the round advanced, so the memos could be read but not checked.
-
-    It matters more later than now. The Week 11 confrontation turns on a promise
-    made in Week 6, and a firm that cannot reopen the Week 6 files cannot
-    reconstruct what it agreed to.
-
-    Nothing is ever withdrawn, and nothing from a later round is ever included —
-    that would leak what is coming.
-    """
-
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        from weeks.registry import registry
-
-        run = resolve_run(request)
-        if run is None:
-            return Response({'detail': 'No run is assigned to this user.'}, status=404)
-        from .views import blocked_response
-        blocked = blocked_response(request.user, run)
-        if blocked:
-            return blocked
-
-        tier = run.team.cohort.tier
-        rounds = []
-        for week in range(1, (run.current_week or 1) + 1):
-            try:
-                module = registry.get(week)
-            except Exception:
-                # A week without a registered module is not an error for the
-                # archive; it simply has nothing to show.
-                continue
-            artifacts = [
-                {'title': a.title, 'kind': a.kind, 'body': a.body}
-                for a in module.artifacts(tier)
-            ]
-            if artifacts:
-                rounds.append({
-                    'week': week,
-                    'title': getattr(module, 'title', '') or f'Round {week}',
-                    'current': week == run.current_week,
-                    'artifacts': artifacts,
-                })
-        # Most recent first: the round being played is the one most often
-        # reopened, and the archive grows to fourteen rounds by the end.
-        rounds.reverse()
-        return Response({'rounds': rounds, 'current_week': run.current_week})
-
-
 class StudentFirmView(APIView):
     """Who is in the requesting student's firm.
 
