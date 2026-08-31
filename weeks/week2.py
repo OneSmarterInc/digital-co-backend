@@ -72,21 +72,70 @@ class Week2Module(WeekModule):
         if tier == Tier.UNDERGRAD:
             cue = ' The positions are deliberately polarized; do not average them into mush.'
         return [
+            # Both plans argue from the Week 1 exhibits — the portfolio map, the
+            # P&L, the unit-economics worksheet and the industry note. Before
+            # this they named the two directions in two sentences each, which
+            # let a firm tell them apart but not cost one against the other,
+            # and costing them against each other is the whole of Week 2.
             Artifact(
                 title='Rival Strategy Plan: Stabilize and Optimize',
                 body=(
-                    'Reinhardt-shaped plan: stop the bleeding, stabilize the core, prove returns, '
-                    'clean up or finish S/4, and defer larger data ambition until the economics and '
-                    'operating model are credible.'
+                    "Circulated by the CFO's office.\n\n"
+                    'Read two rows of the portfolio map together. S/4HANA runs $6.8M a year, is '
+                    'partial after three years, and has no retirement date. The order management '
+                    'core it was supposed to replace still runs $3.1M a year, and its retirement '
+                    'column says "none planned — S/4 target, stalled." DigitalCo is paying $9.9M '
+                    'annually to run two ERP estates because a migration stopped halfway. Now read '
+                    'the P&L. Digital and IT spend went from $19.4M to $27.1M while EBITDA margin '
+                    'fell from 11.4% to 9.8%, and digital services revenue reached $1.9M against '
+                    'the $12M this programme promised would be here by now. The $9M '
+                    'working-capital release is also unrealized; inventory days went 118 to 124.\n\n'
+                    'What the plan does. Finish or cleanly retire S/4 and stop paying for two '
+                    'estates, which is the largest single recoverable cost in the portfolio. '
+                    'Consolidate BI tooling, proposed twice and never funded. Hold connected '
+                    'products at its current 12,550 units rather than funding growth in a service '
+                    'that loses $184 per unit per year. Deliver the working-capital release using '
+                    'systems the company already owns. Return to the data question when digital '
+                    'services can show a paying customer at a price that covers cost.\n\n'
+                    'What it costs. Meridian is at 43% attach and $26.8M services ARR and will not '
+                    'wait. Halberd is at 44% and moving faster on the low end. Two years of '
+                    'discipline may mean the installed-base opportunity is contested by the time '
+                    'DigitalCo returns to it. The plan accepts that.\n\n'
+                    'What it rules out. Any funding request this year that does not reduce cost or '
+                    'deliver revenue within twelve months.'
                     + cue
                 ),
             ),
             Artifact(
                 title='Rival Strategy Plan: Transform to Data and Services',
                 body=(
-                    'Transformation plan: commit DigitalCo to the installed-base data opportunity, '
-                    'fund connected-products as the strategic platform, and organize IT around a '
-                    'services business while protecting the core enough to keep operations stable.'
+                    'Circulated by the office of the Chief Product Officer.\n\n'
+                    'The cost problem is real and it is being read wrong. Platform run cost is '
+                    '$4.2M and largely fixed. The marginal cost of an added connected unit is '
+                    'roughly $60 a year. DigitalCo has 31,400 telematics-capable units in the '
+                    'field and 12,550 connected — 40% of the capable fleet. Every capable unit not '
+                    'connected is $60 of cost avoided and $151 to $439 of revenue foregone.\n\n'
+                    'That is the argument. Meridian earns $439 per connected unit, Halberd $374, '
+                    'DigitalCo $151, on a platform the industry note says costs roughly the same '
+                    'to serve either way. The $184 loss per unit is a verdict on a price set once '
+                    'and never revisited, against a fleet that was never fully connected.\n\n'
+                    'What the plan does. Reprice toward the industry band of $300 to $520. Connect '
+                    'the capable fleet, taking attach from 40% of capable toward the 55 to 70% the '
+                    'note describes for leaders. Fund connected products as the platform rather '
+                    'than as an experiment. Settle data rights with the dealers now, while the '
+                    'company still has something to trade. Protect core operations enough to keep '
+                    'the plants running, but stop treating the ERP migration as the company\'s '
+                    'strategic question.\n\n'
+                    'What it costs. Three things. The channel decides whether this works, and '
+                    'every OEM that tried to monetize machine data over the dealer\'s head has '
+                    'paid for it in orders. The fleet telemetry pipeline has never been '
+                    'security-reviewed by IT and has no IT visibility at all, so scaling attach '
+                    'scales an unreviewed pipeline. And the plan asks the board for patience at '
+                    '9.8% margin, which is when patience is hardest to get.\n\n'
+                    'What it rules out. Waiting. The capital cost of a competitive platform is '
+                    'flat regardless of fleet size, which favours scale or partnership. Two more '
+                    'years at current attach makes DigitalCo the junior partner in someone '
+                    "else's platform."
                     + cue
                 ),
             ),

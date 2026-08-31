@@ -298,3 +298,50 @@ class _SequenceStub:
         self.calls += 1
         self.last_messages = messages
         return self.replies[min(self.calls - 1, len(self.replies) - 1)]
+
+
+class HouseStyleTests(TestCase):
+    """The product is written S/4 everywhere a team reads. A second spelling
+    reads as a second system, and the model writes "S4" often enough that
+    asking it not to is not sufficient on its own."""
+
+    def test_generated_text_is_normalised(self):
+        from briefing.services import house_style
+
+        self.assertEqual(house_style('We kept the S4 mapped.'), 'We kept the S/4 mapped.')
+        self.assertEqual(house_style('S4HANA is half-migrated.'), 'S/4HANA is half-migrated.')
+
+    def test_it_leaves_correct_text_alone(self):
+        from briefing.services import house_style
+
+        for text in ('Your S/4 work is unchanged.', 'S/4HANA sits beside it.'):
+            self.assertEqual(house_style(text), text)
+
+    def test_it_does_not_touch_things_that_merely_look_similar(self):
+        """`s4_disposition` is a field key, and S40 is a different number."""
+        from briefing.services import house_style
+
+        self.assertEqual(house_style('The s4_disposition key.'), 'The s4_disposition key.')
+        self.assertEqual(house_style('S40 units shipped.'), 'S40 units shipped.')
+
+    def test_a_preamble_is_normalised_on_the_way_out(self):
+        from unittest.mock import patch
+
+        cohort = Cohort.objects.create(name='SIM-HOUSE', tier=Tier.UNDERGRAD)
+        team = Team.objects.create(cohort=cohort, name='Team A')
+        user = User.objects.create_user(username='house@example.com', password='pw')
+        team.members.add(user)
+        run = Run.objects.create(team=team, current_week=4)
+        run.state = {
+            **run.state,
+            'coherence_anchor': 'Data platform before ERP, and we accept the delay.',
+            'decision_history': [{'week': 1, 'choices': {'posture': 'consolidate'}}],
+        }
+        run.save()
+
+        drafted = GOOD.replace('the programme', 'the S4 programme')
+        with patch('briefing.services.get_llm_client', return_value=_Stub(drafted)):
+            text, problem = generate_preamble(run, 4)
+        self.assertEqual(problem, '')
+        self.assertNotIn('S4 ', text)
+        self.assertIn('S/4', text)

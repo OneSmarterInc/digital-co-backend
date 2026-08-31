@@ -4,6 +4,7 @@ from core.models import Cohort, Run, Team, Tier, User
 from core.state import SCORE_DIMENSIONS
 from engine.services import submit_week, view_briefing
 from scoring.models import Benchmark
+from scoring.config import WEEK1_TRAP_PENALTY
 from scoring.services import reveal_benchmark, student_benchmark_payload
 from scoring.services import finalize_score
 from weeks.models import WeekInstanceStatus
@@ -2261,8 +2262,10 @@ class InstructorGradingDoesNotDoubleTests(TestCase):
         self.assertEqual(record.coherence, auto.get('coherence', 0) + 2)
 
 
-def week1_payload():
-    return {
+def week1_payload(overrides=None):
+    # Takes overrides like its week2/3/4 siblings, so a test can vary one field
+    # without restating the whole submission.
+    payload = {
         'current_state_assessment': (
             'The root problem is an ungoverned transformation on a broken data foundation, '
             'invisible factory floor, and depleted IT trust.'
@@ -2279,6 +2282,8 @@ def week1_payload():
         'ot_black_box_engaged': True,
         'primary_stakeholder_anchor': 'petrillo',
     }
+    payload.update(overrides or {})
+    return payload
 
 
 def week2_payload(overrides=None):
@@ -2607,3 +2612,85 @@ class HoldEventsAccumulateTests(TestCase):
         instance = self._play(3, week3_payload({'migration_fate': 'descope'}))
         self.assertEqual(instance.score_record.auto_components['scores']['coherence'], 0)
         self.assertEqual(len(self._holds()), before, 'week 3 credited a hold it should not')
+
+
+class Week1CaptureFlagTests(TestCase):
+    """Capture means one executive set the agenda. Slow-walking the data
+    strategy is the opposite instinct, and used to raise the same flag —
+    telling a grader a firm had been captured by the executive whose case it
+    had just declined.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='cap-student', password='pw')
+        cohort = Cohort.objects.create(name='SIM-CAPTURE', tier=Tier.UNDERGRAD)
+        team = Team.objects.create(cohort=cohort, name='Team 6')
+        team.members.add(self.user)
+        self.run = Run.objects.create(team=team)
+
+    def _submit(self, overrides):
+        instance = view_briefing(self.run)
+        submit_week(
+            instance,
+            structured_payload=week1_payload(overrides),
+            deliverable_text='A considered current-state read.',
+            submitted_by=self.user,
+        )
+        instance.refresh_from_db()
+        self.run.refresh_from_db()
+        return instance.score_record
+
+    def test_the_reported_case_a_cost_disciplined_firm_is_not_captured(self):
+        """Team 6: anchored on Reinhardt, every choice cost discipline, no
+        channel move anywhere. It was reported as captured by Ferraro."""
+        record = self._submit({
+            'primary_stakeholder_anchor': 'reinhardt',
+            'connected_products_disposition': 'pause_assess',
+            's4_disposition': 'stabilize_map',
+            'data_strategy_posture': 'slow_walk',
+            'early_action': 'ot_visibility_assessment',
+            'ot_black_box_engaged': True,
+        })
+        flags = record.auto_components['trap_flags']
+        self.assertNotIn('ferraro_capture', flags, 'a Reinhardt-anchored firm was flagged as captured')
+        self.assertIn('data_strategy_slow_walk', flags)
+
+    def test_the_relationship_is_untouched_by_a_slow_walk(self):
+        self._submit({'primary_stakeholder_anchor': 'reinhardt', 'data_strategy_posture': 'slow_walk'})
+        self.assertEqual(
+            self.run.state['relationships']['ferraro'], 0,
+            'slow-walking the data strategy moved the Ferraro relationship',
+        )
+
+    def test_anchoring_on_ferraro_still_captures(self):
+        record = self._submit({
+            'primary_stakeholder_anchor': 'ferraro', 'data_strategy_posture': 'pursue',
+        })
+        self.assertIn('ferraro_capture', record.auto_components['trap_flags'])
+        self.assertEqual(self.run.state['relationships']['ferraro'], 2)
+
+    def test_the_split_does_not_change_what_a_slow_walk_scores(self):
+        """The flag was wrong; the penalty was not. Splitting one flag into two
+        must not move any firm's total, so a slow-walk and a capture — one trap
+        each — still score identically."""
+        slow = self._submit({
+            'primary_stakeholder_anchor': 'reinhardt', 'data_strategy_posture': 'slow_walk',
+        })
+        other = Run.objects.create(
+            team=Team.objects.create(cohort=self.run.team.cohort, name='Control'),
+        )
+        other.team.members.add(self.user)
+        instance = view_briefing(other)
+        submit_week(
+            instance,
+            structured_payload=week1_payload({
+                'primary_stakeholder_anchor': 'ferraro', 'data_strategy_posture': 'pursue',
+            }),
+            deliverable_text='A considered current-state read.',
+            submitted_by=self.user,
+        )
+        instance.refresh_from_db()
+        captured = instance.score_record.auto_components['scores']
+
+        self.assertEqual(slow.auto_components['scores'], captured,
+                         'the two paths no longer cost the same')

@@ -296,8 +296,18 @@ class Week1Module(WeekModule):
         if p.get('s4_disposition') == 'commit_finish':
             flags.append('commit_s4_blind')
             sj -= WEEK1_TRAP_PENALTY
-        if p.get('data_strategy_posture') == 'slow_walk' or p.get('primary_stakeholder_anchor') == 'ferraro':
+        # Two different mistakes, previously sharing one flag and one name.
+        # Capture means the firm let a single executive set the agenda, which is
+        # why it moves that executive's relationship. Slow-walking the data
+        # strategy is the opposite instinct — cost discipline, and the move
+        # Ferraro would argue against — so reporting it as "ferraro capture"
+        # told a grader the firm had been captured by the executive whose case
+        # they had just declined.
+        if p.get('primary_stakeholder_anchor') == 'ferraro':
             flags.append('ferraro_capture')
+            sj -= WEEK1_TRAP_PENALTY
+        if p.get('data_strategy_posture') == 'slow_walk':
+            flags.append('data_strategy_slow_walk')
             sj -= WEEK1_TRAP_PENALTY
 
         engaged_ot = _as_bool(p.get('ot_black_box_engaged')) or p.get('early_action') == 'ot_visibility_assessment'
@@ -307,7 +317,10 @@ class Week1Module(WeekModule):
 
         if engaged_ot:
             ec += WEEK1_PETRILLO_GAIN
-        if 'ferraro_capture' in flags:
+        # Both still carry the execution cost they always did, so no firm's
+        # total moves because of this split. Only the labelling, and the
+        # relationship below, change.
+        if 'ferraro_capture' in flags or 'data_strategy_slow_walk' in flags:
             ec -= WEEK1_CAPTURE_PENALTY
         if p.get('early_action') == 'premature_bold_move':
             ec -= WEEK1_PREMATURE_PENALTY

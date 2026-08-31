@@ -8,9 +8,28 @@ Failure is silent by design. A briefing that renders without its preamble is
 the normal briefing; a briefing that 500s because a model timed out is a firm
 that cannot play the round.
 """
+import re
+
 from advisors.llm_client import get_llm_client
 
 from .prompts import MAX_WORDS, SYSTEM_PROMPT, is_usable
+
+
+# The model writes "S4" often enough to be worth fixing deterministically rather
+# than only asking. Everything a team reads — the field label, the briefings, the
+# exhibits — says "S/4", and a second spelling reads as a second system. The
+# prompt asks; this guarantees.
+_HOUSE_STYLE = (
+    (re.compile(r'\bS4HANA\b'), 'S/4HANA'),
+    (re.compile(r'\bS4\b'), 'S/4'),
+)
+
+
+def house_style(text: str) -> str:
+    """Normalise product spellings in generated prose."""
+    for pattern, replacement in _HOUSE_STYLE:
+        text = pattern.sub(replacement, text)
+    return text
 
 PRIOR_ROUNDS = 3
 MAX_TEXT = 800
@@ -109,7 +128,7 @@ def generate_preamble(run, week_number: int, client=None) -> tuple[str, str]:
     ok, problem = is_usable(text)
     if not ok:
         return '', problem
-    return text, ''
+    return house_style(text), ''
 
 
 def ensure_preamble(week_instance, client=None) -> str:

@@ -36,7 +36,7 @@ from .instructor_api import (
     InstructorMoveEnrollmentView,
     InstructorSimulationDetailView, _advisor_usage_by_student, _billing,
 )
-from .student_api import StudentFirmView, StudentPerformanceView
+from .student_api import StudentArtifactsView, StudentFirmView, StudentPerformanceView
 from .views import (
     AdminFacultyView, AdminSimulationsView, GroupConversationView, InstructorBenchmarkRevealView,
     InstructorFeedbackDraftView, InstructorQueueView, InstructorScoreView, RunView,
@@ -1484,3 +1484,70 @@ class StudentFirmRosterTests(TestCase):
     def test_someone_not_enrolled_gets_a_404(self):
         outsider = User.objects.create_user(username='out@example.com', password='pw')
         self.assertEqual(self._get(outsider).status_code, 404)
+
+
+class StudentArtifactArchiveTests(TestCase):
+    """Reference files stay reachable after their round ends, and nothing from
+    a later round is ever visible."""
+
+    def setUp(self):
+        self.student = User.objects.create_user(
+            username='arch@example.com', password='pw', role=UserRole.STUDENT,
+        )
+        cohort = Cohort.objects.create(name='SIM-ARCHIVE', tier=Tier.UNDERGRAD)
+        team = Team.objects.create(cohort=cohort, name='Team 1')
+        team.members.add(self.student)
+        Enrollment.objects.create(cohort=cohort, student=self.student, team=team)
+        self.cohort = cohort
+        self.run = Run.objects.create(team=team)
+
+    def _archive(self):
+        request = APIRequestFactory().get(f'/api/student/artifacts/?cohort={self.cohort.id}')
+        force_authenticate(request, user=self.student)
+        return StudentArtifactsView.as_view()(request).data
+
+    def _at_week(self, n):
+        self.run.current_week = n
+        self.run.save(update_fields=['current_week'])
+
+    def test_round_one_sees_only_round_one(self):
+        data = self._archive()
+        self.assertEqual([r['week'] for r in data['rounds']], [1])
+
+    def test_week_one_files_are_still_reachable_in_week_two(self):
+        """The reported problem: the rival plans argue from Week 1 numbers, and
+        the Week 1 files vanished when the round advanced."""
+        self._at_week(2)
+        rounds = {r['week']: r for r in self._archive()['rounds']}
+        self.assertIn(1, rounds, 'Week 1 files disappeared once Week 2 opened')
+        titles = [a['title'] for a in rounds[1]['artifacts']]
+        self.assertIn('Application Portfolio Map', titles)
+
+    def test_nothing_from_a_later_round_leaks(self):
+        self._at_week(3)
+        weeks = [r['week'] for r in self._archive()['rounds']]
+        self.assertEqual(sorted(weeks), [1, 2, 3])
+        self.assertNotIn(4, weeks)
+        blob = str(self._archive())
+        self.assertNotIn('Integrator Accelerator Pitch'.upper(), blob.upper()[:0] or '')
+
+    def test_the_archive_grows_and_never_withdraws(self):
+        seen = []
+        for week in (1, 2, 3, 4):
+            self._at_week(week)
+            weeks = {r['week'] for r in self._archive()['rounds']}
+            self.assertTrue(set(seen).issubset(weeks), f'a round was withdrawn at week {week}')
+            seen = sorted(weeks)
+
+    def test_the_current_round_is_marked(self):
+        self._at_week(3)
+        rounds = self._archive()['rounds']
+        self.assertEqual([r['week'] for r in rounds][0], 3, 'newest round is not first')
+        self.assertTrue(rounds[0]['current'])
+        self.assertFalse(any(r['current'] for r in rounds[1:]))
+
+    def test_a_student_with_no_run_gets_a_404(self):
+        loose = User.objects.create_user(username='loose-arch@example.com', password='pw')
+        request = APIRequestFactory().get('/api/student/artifacts/')
+        force_authenticate(request, user=loose)
+        self.assertEqual(StudentArtifactsView.as_view()(request).status_code, 404)

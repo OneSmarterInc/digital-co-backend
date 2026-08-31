@@ -9,6 +9,8 @@ shown scores, traps or rubrics, so it cannot leak them. On top of that it must
 not preview the decision the round is about to ask for, or the round stops
 being a decision.
 """
+import re
+
 SYSTEM_PROMPT = """You write a short opening to a company briefing.
 
 The reader is a student team running an IT organisation across fourteen rounds.
@@ -32,7 +34,10 @@ Never say what they should decide this round, name the options in front of them,
 or hint at what is coming. You are describing where they stand, not advising.
 
 Never praise or criticise. State what they committed to and what it costs them
-now."""
+now.
+
+Write the ERP programme as "S/4", with the slash, every time. It is written that
+way everywhere else the team reads, and "S4" reads as a different system."""
 
 # Same family as the feedback guard: anything that names the scoring machinery,
 # and anything that turns a reminder into advice.
@@ -54,10 +59,18 @@ MIN_WORDS = 15
 MAX_WORDS = 90
 
 
+# Same allowance as the feedback guard: stage gates are the governance mechanism
+# the course asks firms to build, not the scoring machinery.
+ALLOWED_PHRASES = ('stage gate', 'stage gates', 'gated governance', 'gated')
+
+
 def violations(text: str) -> list[str]:
-    lowered = f' {" ".join(text.lower().split())} '
-    return [term for term in PROHIBITED if f' {term} ' in lowered or f' {term},' in lowered
-            or f' {term}.' in lowered]
+    """Matched on word boundaries, so ordinary words that merely contain a
+    prohibited one — mitigate, upgrade, benchmarks — are not rejected."""
+    lowered = ' '.join((text or '').lower().split())
+    for phrase in ALLOWED_PHRASES:
+        lowered = lowered.replace(phrase, ' ')
+    return [term for term in PROHIBITED if re.search(rf'\b{re.escape(term)}\b', lowered)]
 
 
 def is_usable(text: str) -> tuple[bool, str]:
